@@ -668,10 +668,13 @@ The command should directly use the values from the previous output when appropr
                 "Cancel execution"
             ]
             
+            # Default to progressive mode (option 4) if already in adaptive/progressive mode
+            default_choice = "4" if self.adaptive_mode else "1"
+            
             choice = Prompt.ask(
                 "Choose an option",
                 choices=["1", "2", "3", "4", "5"],
-                default="1"
+                default=default_choice
             )
             
             if choice == "1":
@@ -701,7 +704,7 @@ The command should directly use the values from the previous output when appropr
                         selected_commands.append(cmd)
                 return selected_commands, self.adaptive_mode
             elif choice == "4":
-                # Run adaptively, one at a time
+                # Run progressively, one at a time
                 self.adaptive_mode = True
                 # Only return the first command
                 if commands:
@@ -715,7 +718,12 @@ The command should directly use the values from the previous output when appropr
             console.print("  2. Run commands one at a time (progressive mode)")
             console.print("  3. Cancel execution")
             
-            choice = input("\033[1;35m[?] Choose an option (1/2/3): \033[0m")
+            # Default to progressive mode if already in adaptive/progressive mode
+            default_choice = "2" if self.adaptive_mode else "1"
+            choice_prompt = f"\033[1;35m[?] Choose an option (1/2/3) [{default_choice}]: \033[0m"
+            
+            choice_input = input(choice_prompt).strip()
+            choice = choice_input if choice_input else default_choice
             
             if choice == "1":
                 self.adaptive_mode = False
@@ -882,6 +890,17 @@ Provide the specific commands that would accomplish this task, explaining what e
         if EXPLAIN_COMMANDS:
             self.display_commands(commands, explanations)
             
+            # Display mode indicator before command selection
+            if self.adaptive_mode:
+                if RICH_AVAILABLE:
+                    console.print(Panel(
+                        "[bold cyan]PROGRESSIVE MODE ACTIVE[/] - Commands will be executed one at a time",
+                        border_style=self.theme['border_style'],
+                        padding=(1, 2)
+                    ))
+                else:
+                    print("\n\033[1;36m[*] PROGRESSIVE MODE ACTIVE - Commands will be executed one at a time\033[0m")
+            
             # Interactive command selection
             commands, adaptive_mode = self.interactive_command_selection(commands, explanations)
             
@@ -898,11 +917,16 @@ Provide the specific commands that would accomplish this task, explaining what e
         
         if RICH_AVAILABLE:
             mode_str = "[bold cyan]Progressive Mode[/]" if self.adaptive_mode else "[bold]Sequential Mode[/]"
-            console.print(Panel(f"[bold]Executing Commands[/] in {mode_str}", 
-                                border_style=self.theme['border_style']))
+            mode_description = "Commands will be executed ONE AT A TIME" if self.adaptive_mode else "All commands will run in sequence"
+            console.print(Panel(
+                f"[bold]Executing Commands[/] in {mode_str}\n{mode_description}", 
+                border_style=self.theme['border_style']
+            ))
         else:
             mode_str = "Progressive Mode" if self.adaptive_mode else "Sequential Mode"
+            mode_description = "Commands will be executed ONE AT A TIME" if self.adaptive_mode else "All commands will run in sequence"
             print(f"\n\033[1;34m[*] Executing commands in {mode_str}:\033[0m")
+            print(f"\033[1;34m[*] {mode_description}\033[0m")
         
         command_index = 0
         while command_index < len(commands):
