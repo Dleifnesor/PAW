@@ -139,7 +139,3 @@ Each tool should follow this format:
 - **Import errors**: Make sure PAW is installed correctly and its modules are in your Python path
 - **Missing tools**: Some tools may need to be installed separately if you're not using Kali Linux
 - **Permission issues**: Ensure you have write access to the PAW configuration directory
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
