@@ -5,7 +5,7 @@ Custom PAW module: Reconnaissance Suite
 This module provides advanced reconnaissance capabilities for PAW.
 
 To register this module with PAW, run:
-python3 add_custom_tool.py add --name "recon-suite" --category "reconnaissance" \
+sudo add-paw-tool add --name "recon-suite" --category "reconnaissance" \
     --description "Advanced reconnaissance suite for target domains" \
     --usage "recon-suite [options] {target}" \
     --examples "recon-suite -f domains.txt" "recon-suite -d example.com -o report.txt"
@@ -123,7 +123,7 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("-d", "--domain", help="Target domain to perform reconnaissance on")
     group.add_argument("-f", "--file", help="File containing list of domains (one per line)")
-    parser.add_argument("-o", "--output", default="recon_results", help="Output directory for results")
+    parser.add_argument("-o", "--output", default="/var/log/paw/recon_results", help="Output directory for results")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
     
     args = parser.parse_args()

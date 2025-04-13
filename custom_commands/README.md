@@ -25,12 +25,12 @@ Features:
 
 You can create your own custom command modules by following these steps:
 
-1. Create a Python script in this directory
-2. Make it executable with `chmod +x your_script.py`
+1. Create a Python script in `/usr/local/share/paw/custom_commands/`
+2. Make it executable with `sudo chmod +x /usr/local/share/paw/custom_commands/your_script.py`
 3. Register it with PAW using:
 
 ```bash
-python3 ~/.paw/add_custom_tool.py add --name "your-tool-name" \
+sudo add-paw-tool add --name "your-tool-name" \
     --category "your_category" \
     --description "Description of your tool" \
     --usage "your-tool-name [options]" \
@@ -49,7 +49,7 @@ Custom PAW module: Your Tool Name
 This module provides [description of functionality].
 
 To register this module with PAW, run:
-python3 ~/.paw/add_custom_tool.py add --name "your-tool-name" --category "category" \
+sudo add-paw-tool add --name "your-tool-name" --category "category" \
     --description "Description of your tool" \
     --usage "your-tool-name [options]" \
     --examples "your-tool-name -h" "your-tool-name --option value"

@@ -16,10 +16,14 @@ PAW is a natural language-powered automation layer for Kali Linux, turning your 
 git clone https://github.com/yourusername/PAW.git
 cd PAW
 chmod +x install.sh
-./install.sh
+sudo ./install.sh
 ```
 
-The installation script will set up Ollama and download the required LLM model.
+The installation script will:
+- Install PAW system-wide for all users
+- Set up Ollama and download the required LLM model
+- Create command-line tools `paw` and `add-paw-tool`
+- Install documentation
 
 ## Usage
 
@@ -42,16 +46,16 @@ paw "scan the local network for vulnerable services"
 - `paw "check if this system has any known vulnerabilities"`
 - `paw "create a wordlist from the contents of this website"`
 
-See `examples.md` for more detailed examples.
+See `examples.md` for more detailed examples, or view the installed documentation at `/usr/local/share/doc/paw/examples.md`.
 
 ## Extending PAW
 
 ### Adding Custom Tools
 
-You can add custom tools to PAW's registry using the `add_custom_tool.py` script:
+You can add custom tools to PAW's registry using the `add-paw-tool` command:
 
 ```bash
-python3 add_custom_tool.py add --name "my-tool" \
+sudo add-paw-tool add --name "my-tool" \
     --category "custom" \
     --description "My custom tool description" \
     --usage "my-tool [options]" \
@@ -61,24 +65,33 @@ python3 add_custom_tool.py add --name "my-tool" \
 To list all custom tools:
 
 ```bash
-python3 add_custom_tool.py list
+add-paw-tool list
 ```
 
 ### Creating Custom Command Modules
 
-PAW supports custom command modules for more complex functionality. Check out the example in the `custom_commands` directory:
+PAW supports custom command modules for more complex functionality:
 
-1. Create your Python script in the `custom_commands` directory
-2. Make it executable: `chmod +x custom_commands/your_script.py`
-3. Register it with PAW using `add_custom_tool.py`
+1. Create your Python script in `/usr/local/share/paw/custom_commands/`
+2. Make it executable: `sudo chmod +x /usr/local/share/paw/custom_commands/your_script.py`
+3. Register it with PAW using `add-paw-tool`
 
-See the included `recon_suite.py` for a complete example.
+See the included `recon_suite.py` for a complete example or refer to the documentation at `/usr/local/share/doc/paw/custom_commands_guide.md`.
+
+## System Files and Directories
+
+- Commands: `/usr/local/bin/paw` and `/usr/local/bin/add-paw-tool`
+- Main files: `/usr/local/share/paw/`
+- Configuration: `/etc/paw/config.ini`
+- Logs: `/var/log/paw/`
+- Documentation: `/usr/local/share/doc/paw/`
 
 ## Requirements
 
 - Kali Linux
 - 8GB+ RAM (recommended for running the LLM)
 - Internet connection (for initial setup)
+- Root/sudo access (for installation)
 
 ## License
 

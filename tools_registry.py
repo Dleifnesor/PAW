@@ -244,7 +244,7 @@ DEFAULT_TOOLS = {
 def get_tools_registry():
     """Get the tools registry."""
     # Check if a custom registry exists
-    custom_registry_path = os.path.expanduser("~/.paw/tools/custom_registry.json")
+    custom_registry_path = "/usr/local/share/paw/tools/custom_registry.json"
     
     if os.path.exists(custom_registry_path):
         try:
@@ -266,7 +266,7 @@ def add_tool_to_registry(name, category, description, common_usage, examples=Non
         examples = []
     
     # Create directory if it doesn't exist
-    custom_registry_dir = os.path.expanduser("~/.paw/tools")
+    custom_registry_dir = "/usr/local/share/paw/tools"
     custom_registry_path = os.path.join(custom_registry_dir, "custom_registry.json")
     
     os.makedirs(custom_registry_dir, exist_ok=True)

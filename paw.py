@@ -14,6 +14,9 @@ from datetime import datetime
 import httpx
 import importlib.util
 
+# Add the PAW lib directory to the Python path
+sys.path.append('/usr/local/share/paw/lib')
+
 from ascii_art import display_ascii_art
 from tools_registry import get_tools_registry
 
@@ -28,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger('PAW')
 
 # Configuration
-CONFIG_PATH = os.path.expanduser("~/.paw/config.ini")
+CONFIG_PATH = "/etc/paw/config.ini"
 config = configparser.ConfigParser()
 
 if os.path.exists(CONFIG_PATH):
@@ -41,7 +44,7 @@ MODEL = config['DEFAULT'].get('model', 'MartinRizzo/Ayla-Light-v2:12b-q4_K_M')
 OLLAMA_HOST = config['DEFAULT'].get('ollama_host', 'http://localhost:11434')
 EXPLAIN_COMMANDS = config['DEFAULT'].getboolean('explain_commands', True)
 LOG_COMMANDS = config['DEFAULT'].getboolean('log_commands', True)
-LOG_DIRECTORY = os.path.expanduser(config['DEFAULT'].get('log_directory', '~/.paw/logs'))
+LOG_DIRECTORY = config['DEFAULT'].get('log_directory', '/var/log/paw')
 
 # Create log directory if it doesn't exist
 os.makedirs(LOG_DIRECTORY, exist_ok=True)

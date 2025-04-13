@@ -9,7 +9,7 @@ from pathlib import Path
 def add_tool(name, category, description, common_usage, examples):
     """Add a custom tool to the PAW registry."""
     # Create directory if it doesn't exist
-    custom_registry_dir = os.path.expanduser("~/.paw/tools")
+    custom_registry_dir = "/usr/local/share/paw/tools"
     custom_registry_path = os.path.join(custom_registry_dir, "custom_registry.json")
     
     os.makedirs(custom_registry_dir, exist_ok=True)
@@ -41,7 +41,7 @@ def add_tool(name, category, description, common_usage, examples):
 
 def list_tools():
     """List all custom tools in the PAW registry."""
-    custom_registry_path = os.path.expanduser("~/.paw/tools/custom_registry.json")
+    custom_registry_path = "/usr/local/share/paw/tools/custom_registry.json"
     
     if not os.path.exists(custom_registry_path):
         print("No custom tools registered yet.")
