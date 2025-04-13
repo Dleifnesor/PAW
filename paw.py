@@ -932,15 +932,57 @@ As PAW (Prompt Assisted Workflow), analyze this cybersecurity request and provid
 
 REQUEST: {request}
 
-Consider the following Kali Linux tools when appropriate:
-- Network scanning: nmap, masscan, netdiscover
-- Web scanning: nikto, dirb, gobuster, wpscan
-- Vulnerability scanning: openvas, nessus, lynis
-- Exploitation: metasploit, sqlmap, hydra
-- Reconnaissance: whois, theHarvester, recon-ng, maltego
-- Password attacks: hashcat, john, crunch
-- Wireless: aircrack-ng, wifite, kismet
-- Forensics: volatility, autopsy, foremost
+Consider the following Kali Linux tools and their key options when appropriate:
+
+1. Network scanning:
+   - nmap: -sS (stealth scan), -sV (version detection), -O (OS detection), -A (aggressive), -p (port range), -Pn (skip discovery)
+   - masscan: -p (ports), --rate (packets per second), --range (scan range), --banners (capture banners)
+   - netdiscover: -r (range), -i (interface), -p (passive mode)
+
+2. Web scanning:
+   - nikto: -h (host), -port (port to scan), -ssl, -Tuning (scan tuning)
+   - dirb: [url] [wordlist], -a (user agent), -z (delay), -o (output file)
+   - gobuster: -u (url), -w (wordlist), -x (extensions), -t (threads)
+   - wpscan: --url (WordPress URL), --api-token, -e (enumerate)
+
+3. Vulnerability scanning:
+   - openvas: -u (user), -p (password), -T (target)
+   - nessus: similar to OpenVAS with web interface
+   - lynis: audit system, --pentest (pentest mode)
+
+4. Exploitation:
+   - metasploit: use (module), set (option), exploit/run, sessions
+   - sqlmap: -u (URL), --data (POST data), --dbms (database type), --dump
+   - hydra: -l/-L (login), -p/-P (password), -t (tasks), service://server
+
+5. Reconnaissance:
+   - whois: [domain], -h (host)
+   - theHarvester: -d (domain), -b (source), -l (limit)
+   - recon-ng: use (module), set (option), run
+   - maltego: GUI-based with transforms
+
+6. Password attacks:
+   - hashcat: -m (hash type), -a (attack mode), -o (output file)
+   - john: --wordlist (wordlist file), --rules, --format (hash type)
+   - crunch: [min] [max] [charset], -t (pattern), -o (output)
+
+7. Wireless:
+   - aircrack-ng: -w (wordlist), -b (BSSID)
+   - wifite: -wpa (attack WPA), -wep (attack WEP), -wps (attack WPS)
+   - kismet: -c (interface), -f (file), -s (server mode)
+
+8. Forensics and analysis:
+   - volatility: -f (file), --profile (OS profile), plugin commands
+   - autopsy: GUI-based forensic platform
+   - wireshark/tshark: -i (interface), -c (packet count), -r (read file)
+   - tcpdump: -i (interface), -n (don't resolve), -w (write to file)
+
+9. Specialized tools:
+   - binwalk: -e (extract), -M (recursive scan)
+   - steghide: embed/extract, -sf (stego file), -p (passphrase)
+   - macchanger: -r (random MAC), -m (specified MAC)
+   - enum4linux: -a (all enumeration), -u (user), -p (pass)
+   - msfvenom: -p (payload), -f (format), -e (encoder)
 
 Design your commands to work sequentially as a workflow, where later commands build on the results of earlier ones.
 For commands that need input from previous commands, use placeholders like <target_ip> or <discovered_hosts>.

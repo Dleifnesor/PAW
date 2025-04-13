@@ -1,157 +1,155 @@
-# PAW (Prompt Assisted Workflow)
+# PAW Kali Linux Tools Extension
 
-PAW is a natural language-powered automation layer for Kali Linux, turning your terminal into an AI assistant that can understand and execute complex cybersecurity tasks through plain English commands.
+This extension adds extensive Kali Linux penetration testing tools support to the Prompt Assisted Workflow (PAW) framework, enabling security professionals to use natural language to run complex security tasks.
+
+## Contents
+
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Tool Categories](#tool-categories)
+- [Example Scripts](#example-scripts)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
 
 ## Features
 
-- Natural language interface to Kali Linux tools
-- Intelligent task decomposition and tool selection
-- Automated command chaining and execution
-- Beautiful Victorian-style ASCII art interface
-- Powered by Ollama and qwen2.5-coder:7b
+- **100+ Security Tools**: Adds extensive penetration testing tools from Kali Linux
+- **Detailed Descriptions**: Each tool includes purpose, usage, and example commands
+- **Logical Categorization**: Tools organized by function (network scanning, web testing, etc.)
+- **Easy Integration**: Simple installation process that integrates with PAW
+- **Import/Export**: Share tool configurations between systems
+- **Sample Queries**: Natural language examples for common security tasks
+
+## Prerequisites
+
+Before installing, ensure you have:
+
+- PAW (Prompt Assisted Workflow) installed and configured
+- Python 3.6 or higher
+- Administrator/root access (for system-wide installation)
+- Kali Linux OS (recommended) or the specific tools installed if using another Linux distribution
 
 ## Installation
 
+### 1. Clone the repository
+
 ```bash
-git clone https://github.com/yourusername/PAW.git
-cd PAW
-chmod +x install.sh
-sudo ./install.sh
+git clone https://github.com/yourusername/paw-kali-tools.git
+cd paw-kali-tools
 ```
 
-The installation script will:
-- Install PAW system-wide for all users
-- Set up Ollama and download the required LLM model
-- Create command-line tools `PAW` and `add-paw-tool`
-- Install documentation
+### 2. Install the extension
+
+There are two ways to install:
+
+#### A. Using the provided script
+```bash
+python3 add_tools_example.py
+```
+
+#### B. Direct installation
+```bash
+python3 extensive_kali_tools.py
+```
+
+### 3. Verify installation
+
+To verify that the tools were added correctly:
+```bash
+python3 test_kali_tools.py
+```
 
 ## Usage
 
-Simply type `PAW` in your terminal to start:
+Once installed, you can use natural language queries in PAW to execute security tasks:
 
+### Basic Examples
+
+- "Scan the network 192.168.1.0/24 for open ports and vulnerabilities"
+- "Check if the website example.com has SQL injection vulnerabilities"
+- "Perform a brute force attack on the login page at http://example.com/login"
+- "Crack the password hash 5f4dcc3b5aa765d61d8327deb882cf99"
+
+### Advanced Options
+
+#### Preview Tools
+To see what tools would be added without actually adding them:
 ```bash
-PAW
+python3 extensive_kali_tools.py --show
 ```
 
-Or directly issue a command:
-
+#### Export Tools
+To export your tools configuration:
 ```bash
-PAW "scan the local network for vulnerable services"
+python3 extensive_kali_tools.py --export kali_tools.json
 ```
 
-### Additional Command-line Options
-
-- `--timeout SECONDS`: Set custom timeout for LLM requests (default is 180 seconds)
-  ```
-  PAW --timeout 300 "install and configure OpenVAS"
-  ```
-
-- `--prog`: Progressive mode - generate commands one at a time based on previous output
-  ```
-  PAW --prog "scan my network and exploit any vulnerable services"
-  ```
-
-- `--adaptive`: Alternative to --prog, same functionality with different name
-  ```
-  PAW --adaptive "perform comprehensive reconnaissance on example.com"
-  ```
-
-- `--version`: Display version information
-
-## Examples
-
-- `PAW "find all open ports on 192.168.1.0/24 and identify services"`
-- `PAW "perform passive reconnaissance on example.com"`
-- `PAW "check if this system has any known vulnerabilities"`
-- `PAW "create a wordlist from the contents of this website"`
-
-See `examples.md` for more detailed examples, or view the installed documentation at `/usr/local/share/doc/paw/examples.md`.
-
-## Configuration
-
-You can configure PAW using the interactive configuration tool:
-
+#### Import Tools
+To import tools from a configuration file:
 ```bash
-sudo paw-config
+python3 extensive_kali_tools.py --import kali_tools.json
 ```
 
-This tool allows you to:
-- Change the LLM model
-- Adjust timeout settings
-- Toggle command explanation and logging
-- Change log directory
-- Update Ollama host URL
+## Tool Categories
 
-Alternatively, you can manually edit the configuration file:
+The extension includes tools in the following categories:
 
-```bash
-sudo nano /etc/paw/config.ini
-```
+- **Information Gathering**: nmap, dmitry, recon-ng, theHarvester
+- **Vulnerability Analysis**: nikto, lynis
+- **Web Application Analysis**: sqlmap, wpscan, dirb
+- **Password Attacks**: hydra, john, hashcat
+- **Wireless Attacks**: aircrack-ng, wifite
+- **Exploitation Tools**: metasploit, searchsploit
+- **Sniffing & Spoofing**: wireshark, ettercap
+- **Post Exploitation**: empire
+- **Forensics**: autopsy, foremost
+- **Reporting Tools**: dradis
 
-Key settings include:
-- `model`: The Ollama model to use
-- `ollama_host`: The URL of your Ollama server
-- `explain_commands`: Whether to explain commands before execution
-- `log_commands`: Whether to log commands and output
-- `log_directory`: Where to store logs
-- `llm_timeout`: Timeout in seconds for LLM requests (default: 180.0)
-- `command_timeout`: Timeout in seconds for command execution (default: 180.0)
-- `adaptive_mode`: Whether to run in progressive mode by default
+## Example Scripts
 
-## Extending PAW
+The extension includes example scripts to help you get started:
+
+- **add_tools_example.py**: Interactive demo of adding tools to PAW
+- **test_kali_tools.py**: Verifies tools are properly installed and shows sample queries
+
+## Development
 
 ### Adding Custom Tools
 
-You can add custom tools to PAW's registry using the `add-paw-tool` command:
+To add your own custom tools, modify the `KALI_TOOLS` list in `extensive_kali_tools.py` or create a JSON file with your tool definitions and import them.
 
-```bash
-sudo add-paw-tool add --name "my-tool" \
-    --category "custom" \
-    --description "My custom tool description" \
-    --usage "my-tool [options]" \
-    --examples "my-tool -h" "my-tool --option value"
+Each tool should follow this format:
+```python
+{
+    "name": "tool_name",
+    "category": "Tool Category",
+    "description": "Description of what the tool does",
+    "common_usage": "Common command-line usage pattern",
+    "examples": [
+        {"description": "Example task", "command": "tool_name -option target"}
+    ]
+}
 ```
 
-To list all custom tools:
+### Contribution Guidelines
 
-```bash
-add-paw-tool list
-```
+If you'd like to contribute:
 
-### Creating Custom Command Modules
-
-PAW supports custom command modules for more complex functionality:
-
-1. Create your Python script in `/usr/local/share/paw/custom_commands/`
-2. Make it executable: `sudo chmod +x /usr/local/share/paw/custom_commands/your_script.py`
-3. Register it with PAW using `add-paw-tool`
-
-See the included `recon_suite.py` for a complete example or refer to the documentation at `/usr/local/share/doc/paw/custom_commands_guide.md`.
-
-## System Files and Directories
-
-- Commands: `/usr/local/bin/PAW`, `/usr/local/bin/add-paw-tool`, and `/usr/local/bin/paw-config`
-- Main files: `/usr/local/share/paw/`
-- Configuration: `/etc/paw/config.ini`
-- Logs: `/var/log/paw/`
-- Documentation: `/usr/local/share/doc/paw/`
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## Troubleshooting
 
-- **LLM Request Timeout**: If you encounter timeout errors when making complex requests, try increasing the timeout setting using `paw-config` or use the `--timeout` command-line option.
-  ```
-  PAW --timeout 300 "your complex query"
-  ```
-
-- **Ollama Model Issues**: Ensure Ollama is running and properly configured. You can manage your models and update the active model using `paw-config`.
-
-## Requirements
-
-- Kali Linux
-- 8GB+ RAM (recommended for running the LLM)
-- Internet connection (for initial setup)
-- Root/sudo access (for installation)
+- **Import errors**: Make sure PAW is installed correctly and its modules are in your Python path
+- **Missing tools**: Some tools may need to be installed separately if you're not using Kali Linux
+- **Permission issues**: Ensure you have write access to the PAW configuration directory
 
 ## License
 
-MIT 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
