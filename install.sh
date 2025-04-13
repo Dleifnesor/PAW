@@ -131,12 +131,15 @@ if [ ! -f "$CONFIG_DIR/config.ini" ]; then
   echo "Creating default configuration..."
   cat > "$CONFIG_DIR/config.ini" << 'EOF'
 [DEFAULT]
-model = qwen2.5-coder:7b
+model = MartinRizzo/Ayla-Light-v2:12b-q4_K_M
 ollama_host = http://localhost:11434
 explain_commands = true
 log_commands = true
 log_directory = /var/log/paw
 llm_timeout = 180.0
+auto_retry = true
+chain_commands = true
+adaptive_mode = true
 EOF
 fi
 
@@ -172,6 +175,30 @@ if python3 -c "import sys; sys.path.append('$INSTALL_DIR/lib'); import ascii_art
   echo "All required Python modules can be imported."
 else 
   echo "WARNING: Python modules could not be imported. Check your installation."
+fi
+
+# Install the rich library for improved UI
+echo -n "Checking for rich library: "
+if python3 -c "import rich" 2>/dev/null; then
+  echo "rich library is already installed."
+else
+  echo "rich library not found."
+  read -p "Would you like to install the rich library for enhanced UI? (y/n): " install_rich
+  if [[ "$install_rich" =~ ^[Yy]$ ]]; then
+    echo "Installing rich library..."
+    pip3 install rich || {
+      echo "Failed to install using pip3, trying with pip..."
+      pip install rich || echo "WARNING: Failed to install rich library. PAW will use basic UI."
+    }
+  else
+    echo "Skipping rich library installation. PAW will use basic UI."
+  fi
+fi
+
+# Add theme to configuration if it doesn't exist
+if ! grep -q "^theme" "$CONFIG_DIR/config.ini"; then
+  echo "theme = cyberpunk" >> "$CONFIG_DIR/config.ini"
+  echo "Added theme configuration (cyberpunk)"
 fi
 
 # Check if Ollama is installed and running
