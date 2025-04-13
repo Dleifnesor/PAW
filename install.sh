@@ -18,6 +18,50 @@ CONFIG_DIR="/etc/paw"
 DOC_DIR="/usr/local/share/doc/paw"
 LOG_DIR="/var/log/paw"
 
+# Check if Ollama is installed
+if ! command -v ollama >/dev/null 2>&1; then
+  echo "Ollama is not installed, which is required for PAW."
+  read -p "Would you like to install Ollama now? (y/n): " install_ollama
+  
+  if [[ "$install_ollama" =~ ^[Yy]$ ]]; then
+    echo "Installing Ollama..."
+    
+    # Detect OS
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+      # Linux
+      curl -fsSL https://ollama.com/install.sh | sh
+      
+      # Start Ollama service
+      echo "Starting Ollama service..."
+      systemctl enable ollama --now 2>/dev/null || ollama serve &
+      
+      # Wait for Ollama to start
+      echo "Waiting for Ollama to start..."
+      sleep 5
+      
+      # Check if Ollama is running
+      if ! curl -s --connect-timeout 5 http://localhost:11434/api/tags >/dev/null 2>&1; then
+        echo "WARNING: Ollama installation completed but service may not be running."
+        echo "Please start Ollama manually: ollama serve"
+      else
+        echo "Ollama is now running."
+      fi
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+      # macOS
+      echo "Please download and install Ollama from https://ollama.com/download"
+      echo "After installation, launch Ollama and continue with PAW installation."
+      read -p "Press Enter to continue once Ollama is installed..." 
+    else
+      echo "Unsupported OS for automatic Ollama installation."
+      echo "Please visit https://ollama.ai/download for installation instructions."
+      read -p "Press Enter to continue with PAW installation..." 
+    fi
+  else
+    echo "Continuing without installing Ollama. Note that PAW requires Ollama to function."
+    echo "Please visit https://ollama.ai/download to install Ollama manually."
+  fi
+fi
+
 echo "Installing PAW - Prompt Assisted Workflow..."
 
 # Create directories
@@ -105,7 +149,7 @@ chmod 644 "$CONFIG_DIR/config.ini"
 chmod -R 777 "$LOG_DIR"  # Allow all users to write logs
 chmod -R 755 "$DOC_DIR"
 
-# Check if PAW command is installed correctly
+# Verifying installation...
 echo "Verifying installation..."
 
 # Check commands
@@ -141,12 +185,19 @@ if command -v ollama >/dev/null 2>&1; then
     
     # Check if the configured model exists
     MODEL=$(grep "^model" "$CONFIG_DIR/config.ini" | cut -d'=' -f2- | tr -d ' ')
+    echo "Checking for model: $MODEL"
     if curl -s http://localhost:11434/api/tags | grep -q "\"name\":\"$MODEL\""; then
       echo "Configured model '$MODEL' is available."
     else
       echo "WARNING: Configured model '$MODEL' is not available in Ollama."
-      echo "Run: ollama pull $MODEL"
-      echo "Or change the model in /etc/paw/config.ini with: sudo paw-config"
+      read -p "Would you like to pull this model now? (y/n): " pull_model
+      if [[ "$pull_model" =~ ^[Yy]$ ]]; then
+        echo "Pulling model $MODEL (this may take a while)..."
+        ollama pull "$MODEL"
+      else
+        echo "You can pull the model later with: ollama pull $MODEL"
+        echo "Or change the model in /etc/paw/config.ini with: sudo paw-config"
+      fi
     fi
   else
     echo "WARNING: Ollama service is not running."
