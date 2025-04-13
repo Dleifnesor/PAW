@@ -95,6 +95,8 @@ Key settings include:
 - `log_commands`: Whether to log commands and output
 - `log_directory`: Where to store logs
 - `llm_timeout`: Timeout in seconds for LLM requests (default: 180.0)
+- `command_timeout`: Timeout in seconds for command execution (default: 180.0)
+- `adaptive_mode`: Whether to run in progressive mode by default
 
 ## Extending PAW
 

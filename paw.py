@@ -68,8 +68,8 @@ OLLAMA_HOST = config['DEFAULT'].get('ollama_host', 'http://localhost:11434')
 EXPLAIN_COMMANDS = config['DEFAULT'].getboolean('explain_commands', True)
 LOG_COMMANDS = config['DEFAULT'].getboolean('log_commands', True)
 LOG_DIRECTORY = config['DEFAULT'].get('log_directory', '/var/log/paw')
-# Configurable timeout (default: 180 seconds)
-LLM_TIMEOUT = float(config['DEFAULT'].get('llm_timeout', '180.0'))
+# Configurable timeout (default: 600 seconds)
+LLM_TIMEOUT = float(config['DEFAULT'].get('llm_timeout', '600.0'))
 # Theme configuration
 THEME = config['DEFAULT'].get('theme', 'cyberpunk').lower()
 
@@ -429,17 +429,19 @@ class PAW:
                 with open(self.log_file, 'a') as f:
                     f.write(f"\n[COMMAND] {datetime.now()}: {command}\n")
             
+            # Define default command timeout (3 minutes, or configurable)
+            command_timeout = float(config['DEFAULT'].get('command_timeout', '600.0'))
+            
             # Show fancy indicator if rich is available
             if RICH_AVAILABLE:
                 with Progress(
                     SpinnerColumn(),
                     TextColumn("[bold yellow]Executing...[/]"),
-                    BarColumn(),
                     TimeElapsedColumn(),
                     console=console,
-                    transient=True
+                    transient=False
                 ) as progress:
-                    task = progress.add_task("Executing...", total=100)
+                    task = progress.add_task("Executing...", total=None)
                     
                     # Execute the command
                     process = subprocess.Popen(
@@ -450,18 +452,73 @@ class PAW:
                         text=True
                     )
                     
-                    # Simulate progress while command is running
-                    progress_value = 0
-                    while process.poll() is None and progress_value < 90:
-                        progress_value += 1
-                        progress.update(task, completed=progress_value)
-                        time.sleep(0.1)
+                    # Wait for command with timeout
+                    start_time = time.time()
+                    stdout_data = []
+                    stderr_data = []
                     
-                    # Complete progress bar
-                    progress.update(task, completed=100)
+                    # Set up non-blocking I/O
+                    import fcntl
+                    import os
+                    import select
+                    
+                    # Make stdout and stderr non-blocking
+                    for f in [process.stdout, process.stderr]:
+                        flags = fcntl.fcntl(f.fileno(), fcntl.F_GETFL)
+                        fcntl.fcntl(f.fileno(), fcntl.F_SETFL, flags | os.O_NONBLOCK)
+                    
+                    # Poll for results or timeout
+                    while process.poll() is None:
+                        # Check if we need to allow user to abort
+                        elapsed = time.time() - start_time
+                        if elapsed > 10:  # After 10 seconds, show abort option
+                            progress.stop()
+                            if Confirm.ask(f"Command running for {int(elapsed)}s. Abort?", default=False):
+                                process.kill()
+                                console.print("[bold red]Command aborted by user[/]")
+                                return {
+                                    "exit_code": -1,
+                                    "stdout": "".join(stdout_data),
+                                    "stderr": "Command aborted by user after timeout",
+                                    "command": command,
+                                    "variables": variables
+                                }
+                            # Resume progress and reset timer to wait another 10s before asking again
+                            progress.start()
+                            start_time = time.time()
+                        
+                        # Check for output
+                        readable, _, _ = select.select([process.stdout, process.stderr], [], [], 0.5)
+                        for stream in readable:
+                            line = stream.readline()
+                            if line:
+                                if stream == process.stdout:
+                                    stdout_data.append(line)
+                                else:
+                                    stderr_data.append(line)
+                        
+                        # Check for timeout
+                        if time.time() - start_time > command_timeout:
+                            process.kill()
+                            console.print(f"[bold red]Command timed out after {command_timeout} seconds[/]")
+                            return {
+                                "exit_code": -1,
+                                "stdout": "".join(stdout_data),
+                                "stderr": f"Command timed out after {command_timeout} seconds",
+                                "command": command,
+                                "variables": variables
+                            }
+                    
+                    # Get any remaining output
                     stdout, stderr = process.communicate()
+                    stdout_data.append(stdout)
+                    stderr_data.append(stderr)
+                    
+                    # Combine output
+                    stdout = "".join(stdout_data)
+                    stderr = "".join(stderr_data)
             else:
-                # Execute the command
+                # Execute the command with timeout for non-rich UI
                 process = subprocess.Popen(
                     command,
                     shell=True,
@@ -469,7 +526,21 @@ class PAW:
                     stderr=subprocess.PIPE,
                     text=True
                 )
-                stdout, stderr = process.communicate()
+                
+                print(f"\033[1;33m[*] Executing (press Ctrl+C to abort)...\033[0m")
+                
+                try:
+                    stdout, stderr = process.communicate(timeout=command_timeout)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    print(f"\033[1;31m[!] Command timed out after {command_timeout} seconds\033[0m")
+                    return {
+                        "exit_code": -1,
+                        "stdout": "",
+                        "stderr": f"Command timed out after {command_timeout} seconds",
+                        "command": command,
+                        "variables": variables
+                    }
             
             # Log the output
             if LOG_COMMANDS:
@@ -494,6 +565,20 @@ class PAW:
                 "variables": variables
             }
             
+        except KeyboardInterrupt:
+            # Handle keyboard interrupt
+            if RICH_AVAILABLE:
+                console.print("[bold red]Command interrupted by user[/]")
+            else:
+                print("\n\033[1;31m[!] Command interrupted by user\033[0m")
+                
+            return {
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": "Command was interrupted by user",
+                "command": command,
+                "variables": variables
+            }
         except Exception as e:
             logger.error(f"Error executing command: {e}")
             return {
