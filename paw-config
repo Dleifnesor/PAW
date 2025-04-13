@@ -1,0 +1,156 @@
+#!/bin/bash
+
+# PAW Configuration Helper Script
+# This script helps to configure PAW settings easily
+
+CONFIG_FILE="/etc/paw/config.ini"
+BOLD='\033[1m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Check if the script is run with sudo
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}[!] This script must be run with sudo privileges${NC}"
+    echo "    Try: sudo paw-config"
+    exit 1
+fi
+
+# Check if config file exists
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo -e "${RED}[!] Configuration file not found: $CONFIG_FILE${NC}"
+    echo -e "    Run the PAW installation script first"
+    exit 1
+fi
+
+show_current_config() {
+    echo -e "${BOLD}Current PAW Configuration:${NC}"
+    echo -e "${BLUE}───────────────────────────────────────────────────${NC}"
+    grep -v '^\[.*\]' "$CONFIG_FILE" | grep -v '^$' | while read -r line; do
+        key=$(echo "$line" | cut -d'=' -f1)
+        value=$(echo "$line" | cut -d'=' -f2-)
+        echo -e "${BOLD}$key${NC} = $value"
+    done
+    echo -e "${BLUE}───────────────────────────────────────────────────${NC}"
+}
+
+set_config_value() {
+    local key=$1
+    local value=$2
+    
+    # Check if the key exists
+    if grep -q "^$key=" "$CONFIG_FILE"; then
+        # Replace existing value
+        sed -i "s|^$key=.*|$key=$value|" "$CONFIG_FILE"
+        echo -e "${GREEN}[+] Updated $key to $value${NC}"
+    else
+        # Determine which section to add to (assuming DEFAULT if not found)
+        local section="DEFAULT"
+        if [ "$key" = "tools_registry" ]; then
+            section="TOOLS"
+        fi
+        
+        # Add new key-value pair to the appropriate section
+        sed -i "/^\[$section\]/a $key=$value" "$CONFIG_FILE"
+        echo -e "${GREEN}[+] Added $key=$value to [$section] section${NC}"
+    fi
+}
+
+update_timeout() {
+    read -p "Enter new timeout in seconds [current: $(grep "^llm_timeout=" "$CONFIG_FILE" | cut -d'=' -f2-)]: " timeout
+    
+    if [[ "$timeout" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        set_config_value "llm_timeout" "$timeout"
+    else
+        echo -e "${RED}[!] Invalid timeout value. Please enter a number.${NC}"
+    fi
+}
+
+update_model() {
+    # Get available models from Ollama
+    echo -e "${BLUE}[*] Fetching available models from Ollama...${NC}"
+    local models=$(curl -s http://localhost:11434/api/tags | grep -o '"name":"[^"]*"' | cut -d'"' -f4)
+    
+    if [ -z "$models" ]; then
+        echo -e "${RED}[!] Could not fetch models from Ollama. Is it running?${NC}"
+        return
+    fi
+    
+    echo -e "${BOLD}Available models:${NC}"
+    local i=1
+    local model_array=()
+    while read -r model; do
+        echo -e "  ${BOLD}$i)${NC} $model"
+        model_array+=("$model")
+        ((i++))
+    done <<< "$models"
+    
+    local current_model=$(grep "^model=" "$CONFIG_FILE" | cut -d'=' -f2-)
+    echo -e "${YELLOW}[*] Current model: $current_model${NC}"
+    
+    read -p "Enter model number or type a custom model name: " selection
+    
+    if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -gt 0 ] && [ "$selection" -le "${#model_array[@]}" ]; then
+        selected_model="${model_array[$((selection-1))]}"
+        set_config_value "model" "$selected_model"
+    elif [ -n "$selection" ]; then
+        set_config_value "model" "$selection"
+    else
+        echo -e "${RED}[!] Invalid selection${NC}"
+    fi
+}
+
+toggle_setting() {
+    local setting=$1
+    local current_value=$(grep "^$setting=" "$CONFIG_FILE" | cut -d'=' -f2-)
+    
+    if [ "$current_value" = "true" ]; then
+        set_config_value "$setting" "false"
+    else
+        set_config_value "$setting" "true"
+    fi
+}
+
+# Main menu
+show_menu() {
+    clear
+    echo -e "${BOLD}PAW Configuration Tool${NC}"
+    echo -e "${BLUE}═════════════════════════════════════════════════${NC}"
+    echo -e "  ${BOLD}1)${NC} Show current configuration"
+    echo -e "  ${BOLD}2)${NC} Change LLM model"
+    echo -e "  ${BOLD}3)${NC} Adjust timeout"
+    echo -e "  ${BOLD}4)${NC} Toggle command explanation"
+    echo -e "  ${BOLD}5)${NC} Toggle command logging"
+    echo -e "  ${BOLD}6)${NC} Change log directory"
+    echo -e "  ${BOLD}7)${NC} Change Ollama host"
+    echo -e "  ${BOLD}8)${NC} Exit"
+    echo -e "${BLUE}═════════════════════════════════════════════════${NC}"
+    read -p "Select an option: " choice
+    
+    case $choice in
+        1) show_current_config ;;
+        2) update_model ;;
+        3) update_timeout ;;
+        4) toggle_setting "explain_commands" ;;
+        5) toggle_setting "log_commands" ;;
+        6) 
+            read -p "Enter new log directory: " log_dir
+            set_config_value "log_directory" "$log_dir"
+            ;;
+        7) 
+            read -p "Enter Ollama host URL [e.g. http://localhost:11434]: " host
+            set_config_value "ollama_host" "$host"
+            ;;
+        8) echo -e "${GREEN}Exiting...${NC}"; exit 0 ;;
+        *) echo -e "${RED}Invalid option${NC}" ;;
+    esac
+    
+    read -p "Press Enter to continue..."
+}
+
+# Main loop
+while true; do
+    show_menu
+done 

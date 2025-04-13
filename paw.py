@@ -17,8 +17,13 @@ import importlib.util
 # Add the PAW lib directory to the Python path
 sys.path.append('/usr/local/share/paw/lib')
 
-from ascii_art import display_ascii_art
-from tools_registry import get_tools_registry
+try:
+    from ascii_art import display_ascii_art
+    from tools_registry import get_tools_registry
+except ImportError:
+    # For development/local environment
+    from ascii_art import display_ascii_art
+    from tools_registry import get_tools_registry
 
 # Set up logging
 logging.basicConfig(
@@ -45,6 +50,8 @@ OLLAMA_HOST = config['DEFAULT'].get('ollama_host', 'http://localhost:11434')
 EXPLAIN_COMMANDS = config['DEFAULT'].getboolean('explain_commands', True)
 LOG_COMMANDS = config['DEFAULT'].getboolean('log_commands', True)
 LOG_DIRECTORY = config['DEFAULT'].get('log_directory', '/var/log/paw')
+# Configurable timeout (default: 180 seconds)
+LLM_TIMEOUT = float(config['DEFAULT'].get('llm_timeout', '180.0'))
 
 # Create log directory if it doesn't exist
 os.makedirs(LOG_DIRECTORY, exist_ok=True)
@@ -64,6 +71,7 @@ class PAW:
         """Generate a response from the LLM using Ollama."""
         try:
             logger.info(f"Sending prompt to LLM: {prompt[:50]}...")
+            print(f"\033[1;34m[*] Thinking...\033[0m (timeout: {LLM_TIMEOUT}s)")
             
             response = httpx.post(
                 f"{OLLAMA_HOST}/api/generate",
@@ -73,7 +81,7 @@ class PAW:
                     "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Your job is to help users perform cybersecurity tasks by translating natural language requests into a sequence of commands. For each request, output a JSON object with the following structure: {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. The 'plan' should outline the steps to achieve the user's goal, 'commands' should list the actual Linux commands to execute (one per line), and 'explanation' should provide context for what each command does.",
                     "stream": False,
                 },
-                timeout=60.0
+                timeout=LLM_TIMEOUT
             )
             
             if response.status_code != 200:
@@ -83,6 +91,9 @@ class PAW:
             result = response.json()
             return self.extract_json_from_response(result.get("response", ""))
             
+        except httpx.TimeoutException:
+            logger.error(f"LLM request timed out after {LLM_TIMEOUT} seconds")
+            return {"error": f"LLM request timed out after {LLM_TIMEOUT} seconds. Try setting a longer timeout in /etc/paw/config.ini."}
         except Exception as e:
             logger.error(f"Error generating LLM response: {e}")
             return {"error": str(e)}
@@ -179,7 +190,7 @@ Provide the specific commands that would accomplish this task, explaining what e
         response = self.generate_llm_response(context + request)
         
         if "error" in response:
-            print(f"Error: {response['error']}")
+            print(f"\033[1;31m[!] Error: {response['error']}\033[0m")
             return
         
         # Display the plan
@@ -252,12 +263,19 @@ def main():
     parser = argparse.ArgumentParser(description="PAW - Prompt Assisted Workflow for Kali Linux")
     parser.add_argument("request", nargs="?", help="Natural language request")
     parser.add_argument("--version", action="store_true", help="Show version")
+    parser.add_argument("--timeout", type=float, help="Set LLM request timeout in seconds")
     
     args = parser.parse_args()
     
     if args.version:
         print("PAW - Prompt Assisted Workflow v1.0")
         sys.exit(0)
+    
+    # Override timeout if specified
+    global LLM_TIMEOUT
+    if args.timeout:
+        LLM_TIMEOUT = args.timeout
+        print(f"\033[1;34m[*] LLM timeout set to {LLM_TIMEOUT} seconds\033[0m")
     
     # Display ASCII art
     display_ascii_art()

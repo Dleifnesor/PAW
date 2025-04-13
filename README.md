@@ -22,31 +22,69 @@ sudo ./install.sh
 The installation script will:
 - Install PAW system-wide for all users
 - Set up Ollama and download the required LLM model
-- Create command-line tools `paw` and `add-paw-tool`
+- Create command-line tools `PAW` and `add-paw-tool`
 - Install documentation
 
 ## Usage
 
-Simply type `paw` in your terminal to start:
+Simply type `PAW` in your terminal to start:
 
 ```bash
-paw
+PAW
 ```
 
 Or directly issue a command:
 
 ```bash
-paw "scan the local network for vulnerable services"
+PAW "scan the local network for vulnerable services"
 ```
+
+### Additional Command-line Options
+
+- `--timeout SECONDS`: Set custom timeout for LLM requests (default is 180 seconds)
+  ```
+  PAW --timeout 300 "install and configure OpenVAS"
+  ```
+
+- `--version`: Display version information
 
 ## Examples
 
-- `paw "find all open ports on 192.168.1.0/24 and identify services"`
-- `paw "perform passive reconnaissance on example.com"`
-- `paw "check if this system has any known vulnerabilities"`
-- `paw "create a wordlist from the contents of this website"`
+- `PAW "find all open ports on 192.168.1.0/24 and identify services"`
+- `PAW "perform passive reconnaissance on example.com"`
+- `PAW "check if this system has any known vulnerabilities"`
+- `PAW "create a wordlist from the contents of this website"`
 
 See `examples.md` for more detailed examples, or view the installed documentation at `/usr/local/share/doc/paw/examples.md`.
+
+## Configuration
+
+You can configure PAW using the interactive configuration tool:
+
+```bash
+sudo paw-config
+```
+
+This tool allows you to:
+- Change the LLM model
+- Adjust timeout settings
+- Toggle command explanation and logging
+- Change log directory
+- Update Ollama host URL
+
+Alternatively, you can manually edit the configuration file:
+
+```bash
+sudo nano /etc/paw/config.ini
+```
+
+Key settings include:
+- `model`: The Ollama model to use
+- `ollama_host`: The URL of your Ollama server
+- `explain_commands`: Whether to explain commands before execution
+- `log_commands`: Whether to log commands and output
+- `log_directory`: Where to store logs
+- `llm_timeout`: Timeout in seconds for LLM requests (default: 180.0)
 
 ## Extending PAW
 
@@ -80,11 +118,20 @@ See the included `recon_suite.py` for a complete example or refer to the documen
 
 ## System Files and Directories
 
-- Commands: `/usr/local/bin/paw` and `/usr/local/bin/add-paw-tool`
+- Commands: `/usr/local/bin/PAW`, `/usr/local/bin/add-paw-tool`, and `/usr/local/bin/paw-config`
 - Main files: `/usr/local/share/paw/`
 - Configuration: `/etc/paw/config.ini`
 - Logs: `/var/log/paw/`
 - Documentation: `/usr/local/share/doc/paw/`
+
+## Troubleshooting
+
+- **LLM Request Timeout**: If you encounter timeout errors when making complex requests, try increasing the timeout setting using `paw-config` or use the `--timeout` command-line option.
+  ```
+  PAW --timeout 300 "your complex query"
+  ```
+
+- **Ollama Model Issues**: Ensure Ollama is running and properly configured. You can manage your models and update the active model using `paw-config`.
 
 ## Requirements
 
