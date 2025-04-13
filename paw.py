@@ -62,7 +62,7 @@ else:
     logger.error(f"Configuration file not found: {CONFIG_PATH}")
     sys.exit(1)
 
-MODEL = config['DEFAULT'].get('model', 'MartinRizzo/Ayla-Light-v2:12b-q4_K_M')
+MODEL = config['DEFAULT'].get('model', 'qwen2.5-coder:7b')
 OLLAMA_HOST = config['DEFAULT'].get('ollama_host', 'http://localhost:11434')
 EXPLAIN_COMMANDS = config['DEFAULT'].getboolean('explain_commands', True)
 LOG_COMMANDS = config['DEFAULT'].getboolean('log_commands', True)

@@ -131,7 +131,7 @@ if [ ! -f "$CONFIG_DIR/config.ini" ]; then
   echo "Creating default configuration..."
   cat > "$CONFIG_DIR/config.ini" << 'EOF'
 [DEFAULT]
-model = MartinRizzo/Ayla-Light-v2:12b-q4_K_M
+model = qwen2.5-coder:7b
 ollama_host = http://localhost:11434
 explain_commands = true
 log_commands = true
