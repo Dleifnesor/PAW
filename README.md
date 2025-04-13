@@ -8,7 +8,7 @@ PAW is a natural language-powered automation layer for Kali Linux, turning your 
 - Intelligent task decomposition and tool selection
 - Automated command chaining and execution
 - Beautiful Victorian-style ASCII art interface
-- Powered by Ollama and MartinRizzo/Ayla-Light-v2:12b-q4_K_M
+- Powered by Ollama and qwen2.5-coder:7b
 
 ## Installation
 
