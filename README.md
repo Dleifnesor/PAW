@@ -46,6 +46,16 @@ PAW "scan the local network for vulnerable services"
   PAW --timeout 300 "install and configure OpenVAS"
   ```
 
+- `--prog`: Progressive mode - generate commands one at a time based on previous output
+  ```
+  PAW --prog "scan my network and exploit any vulnerable services"
+  ```
+
+- `--adaptive`: Alternative to --prog, same functionality with different name
+  ```
+  PAW --adaptive "perform comprehensive reconnaissance on example.com"
+  ```
+
 - `--version`: Display version information
 
 ## Examples

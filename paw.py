@@ -14,6 +14,7 @@ from datetime import datetime
 import httpx
 import importlib.util
 import re
+import socket
 
 # Add rich library for fancy UI
 try:
@@ -281,11 +282,38 @@ class PAW:
         if urls:
             variables['urls'] = urls
             variables['target_url'] = urls[0]
+
+        # Extract host status information from nmap
+        if "host seems down" in stdout.lower():
+            variables['host_status'] = "down"
+        elif "0 hosts up" in stdout.lower():
+            variables['host_status'] = "down"
+        elif "hosts up" in stdout.lower():
+            variables['host_status'] = "up"
             
         return variables
     
+    def get_local_ip(self):
+        """Get the local IP address for the machine."""
+        try:
+            # Create a socket to determine the local IP used for internet connection
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Doesn't need to be reachable, just used to determine interface
+            s.connect(('8.8.8.8', 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            return local_ip
+        except Exception:
+            # Fallback to loopback if detection fails
+            return "127.0.0.1"
+    
     def substitute_variables(self, command, variables):
         """Replace placeholders in commands with actual values from previous results."""
+        # Add local IP to variables if not already present
+        if 'your_ip' not in variables and 'local_ip' not in variables:
+            variables['your_ip'] = self.get_local_ip()
+            variables['local_ip'] = variables['your_ip']
+        
         # Replace direct placeholders like <target_ip>
         for var_name, var_value in variables.items():
             if isinstance(var_value, list):
@@ -311,6 +339,11 @@ class PAW:
                 for placeholder in placeholders:
                     if placeholder in variables:
                         fixed_command = fixed_command.replace(f"<{placeholder}>", str(variables[placeholder]))
+                    elif placeholder == "your_ip" or placeholder == "local_ip":
+                        # Get local IP address
+                        local_ip = self.get_local_ip()
+                        variables[placeholder] = local_ip
+                        fixed_command = fixed_command.replace(f"<{placeholder}>", local_ip)
                     else:
                         # Ask user for input for this variable
                         if RICH_AVAILABLE:
@@ -332,6 +365,26 @@ class PAW:
                 fixed_command = fixed_command.replace(user_ip, f"{user_ip}/24")
                 variables['target_ip_range'] = f"{user_ip}/24"
         
+        elif "host seems down" in stderr.lower() or "no route to host" in stderr.lower():
+            # Host is down or unreachable - add -Pn to nmap or try different approach
+            if "nmap" in command and "-Pn" not in command:
+                fixed_command = command.replace("nmap ", "nmap -Pn ")
+                suggestion = "Host appears to be down or blocking ping. Adding -Pn to bypass ping discovery."
+            else:
+                # For non-nmap commands, inform user the host is unreachable
+                suggestion = "The target host appears to be unreachable. Check connectivity or try a different target."
+                if RICH_AVAILABLE:
+                    user_ip = Prompt.ask("[bold yellow]Enter an alternative target IP address[/]", default=re.findall(ip_pattern, command)[0] if re.findall(ip_pattern, command) else "")
+                else:
+                    user_ip = input("Enter an alternative target IP address: ")
+                
+                if user_ip:
+                    # Replace IP in command
+                    old_ip = re.findall(ip_pattern, command)
+                    if old_ip:
+                        fixed_command = command.replace(old_ip[0], user_ip)
+                        variables['target_ip'] = user_ip
+        
         elif "permission denied" in stderr.lower() or "privileges" in stderr.lower():
             # Permission issue
             fixed_command = "sudo " + command
@@ -340,12 +393,18 @@ class PAW:
         elif "Syntax error" in stderr:
             # Syntax error - try to fix basic issues
             for placeholder in re.findall(r'<(\w+)>', command):
-                if RICH_AVAILABLE:
-                    user_value = Prompt.ask(f"[bold yellow]Enter value for[/] [bold cyan]<{placeholder}>[/]")
+                if placeholder == "your_ip" or placeholder == "local_ip":
+                    # Get local IP address
+                    local_ip = self.get_local_ip()
+                    variables[placeholder] = local_ip
+                    fixed_command = fixed_command.replace(f"<{placeholder}>", local_ip)
                 else:
-                    user_value = input(f"Enter value for <{placeholder}>: ")
-                variables[placeholder] = user_value
-                fixed_command = fixed_command.replace(f"<{placeholder}>", user_value)
+                    if RICH_AVAILABLE:
+                        user_value = Prompt.ask(f"[bold yellow]Enter value for[/] [bold cyan]<{placeholder}>[/]")
+                    else:
+                        user_value = input(f"Enter value for <{placeholder}>: ")
+                    variables[placeholder] = user_value
+                    fixed_command = fixed_command.replace(f"<{placeholder}>", user_value)
         
         return fixed_command, suggestion, variables
     
@@ -559,6 +618,12 @@ COMMAND OUTPUT:
 Available variables detected:
 {json.dumps(variables, indent=2)}
 
+IMPORTANT NOTES:
+- If the previous command indicates the host is down or unreachable, suggest a command to troubleshoot connectivity or try an alternative approach.
+- If the previous command was nmap and showed the host is down, suggest adding -Pn flag.
+- Do not use <your_ip> placeholders in commands, directly use the detected local IP.
+- Always adapt based on previous output and errors.
+
 Based on the previous command and its output, generate the next most logical command to continue this workflow.
 Respond with a JSON object containing:
 {{
@@ -582,6 +647,9 @@ The command should directly use the values from the previous output when appropr
         explanation = response.get("explanation", "")
         if isinstance(explanation, list) and explanation:
             explanation = explanation[0]
+
+        # Substitute any remaining placeholders
+        next_command = self.substitute_variables(next_command, variables)
             
         return next_command, explanation
     
@@ -596,7 +664,7 @@ The command should directly use the values from the previous output when appropr
                 "Run all commands",
                 "Select commands to run",
                 "Edit commands before running", 
-                "Run commands one at a time (adaptive mode)",
+                "Run commands one at a time (progressive mode)",
                 "Cancel execution"
             ]
             
@@ -644,7 +712,7 @@ The command should directly use the values from the previous output when appropr
         else:
             console.print("\n[*] Options:")
             console.print("  1. Run all commands")
-            console.print("  2. Run commands one at a time (adaptive mode)")
+            console.print("  2. Run commands one at a time (progressive mode)")
             console.print("  3. Cancel execution")
             
             choice = input("\033[1;35m[?] Choose an option (1/2/3): \033[0m")
@@ -761,6 +829,9 @@ The command should directly use the values from the previous output when appropr
         # Override adaptive mode if specified
         if adaptive_override is not None:
             self.adaptive_mode = adaptive_override
+            
+        # Clean up the request
+        request = request.replace('\r', '').strip()
         
         # Generate LLM response
         context = f"""
@@ -826,11 +897,11 @@ Provide the specific commands that would accomplish this task, explaining what e
         variables = {}  # Store variables for command chaining
         
         if RICH_AVAILABLE:
-            mode_str = "[bold cyan]Adaptive Mode[/]" if self.adaptive_mode else "[bold]Sequential Mode[/]"
+            mode_str = "[bold cyan]Progressive Mode[/]" if self.adaptive_mode else "[bold]Sequential Mode[/]"
             console.print(Panel(f"[bold]Executing Commands[/] in {mode_str}", 
                                 border_style=self.theme['border_style']))
         else:
-            mode_str = "Adaptive Mode" if self.adaptive_mode else "Sequential Mode"
+            mode_str = "Progressive Mode" if self.adaptive_mode else "Sequential Mode"
             print(f"\n\033[1;34m[*] Executing commands in {mode_str}:\033[0m")
         
         command_index = 0
@@ -1019,7 +1090,11 @@ def main():
     parser.add_argument("--version", action="store_true", help="Show version")
     parser.add_argument("--timeout", type=float, help="Set LLM request timeout in seconds")
     parser.add_argument("--theme", choices=list(THEMES.keys()), help="Set UI theme")
-    parser.add_argument("--adaptive", action="store_true", help="Generate each command based on previous results")
+    
+    # Create a mutually exclusive group for progressive mode options
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--adaptive", action="store_true", help="Generate each command based on previous results (same as --prog)")
+    mode_group.add_argument("--prog", action="store_true", help="Progressive mode: generate commands one at a time based on previous output")
     
     args = parser.parse_args()
     
@@ -1058,7 +1133,9 @@ def main():
     
     if args.request:
         # Process the request with adaptive mode if specified
-        paw.process_request(args.request, args.adaptive)
+        # --prog is an alternative to --adaptive
+        adaptive_mode = args.adaptive or args.prog
+        paw.process_request(args.request, adaptive_mode)
     else:
         if RICH_AVAILABLE:
             console.print("[bold cyan]Welcome to PAW - Prompt Assisted Workflow[/]")
@@ -1074,6 +1151,9 @@ def main():
                 else:
                     request = input("\n\033[1;35mPAW> \033[0m")
                 
+                # Strip out any carriage returns and whitespace
+                request = request.replace('\r', '').replace('^M', '').strip()
+                
                 if request.lower() in ["exit", "quit"]:
                     if RICH_AVAILABLE:
                         console.print("[bold cyan]Goodbye![/]")
@@ -1088,13 +1168,20 @@ def main():
                 if RICH_AVAILABLE:
                     console.print("\n[bold cyan]Execution interrupted[/]")
                 else:
-                    print("\n\033[1;34m[*] Execution interrupted\033[0m")
-                break
+                    print("\n\033[1;34m[*] Execution interrupted[/]")
+                continue
+                
             except Exception as e:
                 if RICH_AVAILABLE:
-                    console.print(f"\n[bold red]Error:[/] {e}")
+                    console.print(f"\n[bold red]Error: {str(e)}[/]")
                 else:
-                    print(f"\n\033[1;31m[!] Error: {e}\033[0m")
+                    print(f"\n\033[1;31m[!] Error: {str(e)}\033[0m")
+                # Clean up any remaining ^M characters from stdout/stderr
+                if hasattr(e, 'stdout') and e.stdout:
+                    e.stdout = e.stdout.replace('\r', '')
+                if hasattr(e, 'stderr') and e.stderr:
+                    e.stderr = e.stderr.replace('\r', '')
+                continue
 
 if __name__ == "__main__":
     main() 
