@@ -719,24 +719,29 @@ Respond with a JSON object containing:
 The command should directly use the values from the previous output when appropriate, not placeholders.
 """
         
-        response = self.generate_llm_response(context)
-        
-        if "error" in response:
-            return None, None
-        
-        # Extract the next command and explanation
-        next_command = response.get("command", "")
-        if isinstance(next_command, list) and next_command:
-            next_command = next_command[0]
-        
-        explanation = response.get("explanation", "")
-        if isinstance(explanation, list) and explanation:
-            explanation = explanation[0]
-
-        # Substitute any remaining placeholders
-        next_command = self.substitute_variables(next_command, variables)
+        try:
+            # Generate response without using a live display
+            response = self.generate_llm_response(context)
             
-        return next_command, explanation
+            if "error" in response:
+                return None, None
+            
+            # Extract the next command and explanation
+            next_command = response.get("command", "")
+            if isinstance(next_command, list) and next_command:
+                next_command = next_command[0]
+            
+            explanation = response.get("explanation", "")
+            if isinstance(explanation, list) and explanation:
+                explanation = explanation[0]
+
+            # Substitute any remaining placeholders
+            next_command = self.substitute_variables(next_command, variables)
+                
+            return next_command, explanation
+        except Exception as e:
+            logger.error(f"Error generating next command: {e}")
+            return None, None
     
     def interactive_command_selection(self, commands, explanations):
         """Allow user to selectively run or edit commands."""
@@ -938,54 +943,380 @@ REQUEST: {request}
 Consider the following Kali Linux tools and their key options when appropriate:
 
 1. Network scanning:
-   - nmap: -sS (stealth scan), -sV (version detection), -O (OS detection), -A (aggressive), -p (port range), -Pn (skip discovery)
-   - masscan: -p (ports), --rate (packets per second), --range (scan range), --banners (capture banners)
-   - netdiscover: -r (range), -i (interface), -p (passive mode)
+   - nmap: 
+     * NEVER use -p- (full port scan) as it takes too long
+     * Use -p 1-1024 for common ports
+     * Use -p 80,443,8080 for web services
+     * Use -p 21,22,23,25,53,110,143,445,3389 for common services
+     * Use -sS (stealth scan), -sV (version detection), -O (OS detection), -A (aggressive)
+     * Use -Pn (skip discovery) if host is blocking ping
+     * Use -T4 for faster scanning (T0-T5, where T4 is aggressive)
+     * Use --min-rate 1000 for minimum packet rate
+     * Use --max-retries 2 to limit retransmissions
+     * Use --script=vuln for vulnerability scanning
+     * Use --script=safe for safe scripts
+     * Use --script-args=unsafe=1 for unsafe scripts
+     * Use --script-timeout 30s for script timeout
+     * Use --host-timeout 5m for host timeout
+     * Use --min-parallelism 100 for parallel probes
+     * Use --max-parallelism 1024 for max parallel probes
+     * Use --min-hostgroup 256 for host grouping
+     * Use --max-hostgroup 1024 for max host grouping
+   - masscan: 
+     * -p (ports), --rate (packets per second)
+     * --range (scan range), --banners (capture banners)
+     * --adapter-ip (specify source IP)
+     * --adapter-port (specify source port)
+     * --adapter-mac (specify source MAC)
+     * --wait (seconds to wait after sending packets)
+     * --retries (number of retries)
+     * --ping (ICMP echo request)
+     * --router-mac (specify router MAC)
+   - netdiscover: 
+     * -r (range), -i (interface), -p (passive mode)
+     * -f (fast mode), -s (sleep time)
+     * -c (count), -L (ignore local)
+     * -P (print results), -S (hardware scan)
+     * -n (no name resolution)
 
 2. Web scanning:
-   - nikto: -h (host), -port (port to scan), -ssl, -Tuning (scan tuning)
-   - dirb: [url] [wordlist], -a (user agent), -z (delay), -o (output file)
-   - gobuster: -u (url), -w (wordlist), -x (extensions), -t (threads)
-   - wpscan: --url (WordPress URL), --api-token, -e (enumerate)
+   - nikto: 
+     * -h (host), -port (port to scan)
+     * -ssl, -Tuning (scan tuning)
+     * -Cgidirs (CGI directories)
+     * -Display (output format)
+     * -Format (output format)
+     * -Plugins (plugin selection)
+     * -Single (single request)
+     * -timeout (timeout in seconds)
+     * -useproxy (use proxy)
+     * -vhost (virtual host)
+   - dirb: 
+     * [url] [wordlist]
+     * -a (user agent), -z (delay)
+     * -o (output file), -p (proxy)
+     * -r (not recursive), -R (recursive)
+     * -S (silent), -t (threads)
+     * -u (username), -P (password)
+     * -X (extensions), -H (headers)
+   - gobuster: 
+     * -u (url), -w (wordlist)
+     * -x (extensions), -t (threads)
+     * -c (cookies), -H (headers)
+     * -k (skip SSL verify)
+     * -n (no status), -q (quiet)
+     * -s (status codes)
+     * -timeout (timeout)
+     * -proxy (proxy)
+     * -wildcard (wildcard test)
+   - wpscan: 
+     * --url (WordPress URL)
+     * --api-token, -e (enumerate)
+     * --enumerate (what to enumerate)
+     * --plugins-detection (plugin detection)
+     * --plugins-version-detection
+     * --themes-detection
+     * --themes-version-detection
+     * --timthumbs
+     * --config-backups
+     * --db-exports
+     * --medias-detection
+     * --users-detection
+     * --passwords
 
 3. Vulnerability scanning:
-   - openvas: -u (user), -p (password), -T (target)
-   - nessus: similar to OpenVAS with web interface
-   - lynis: audit system, --pentest (pentest mode)
+   - openvas: 
+     * -u (user), -p (password)
+     * -T (target), -P (port)
+     * -c (config), -q (quiet)
+     * -R (report), -f (format)
+     * -i (input), -o (output)
+     * -x (xml), -X (XSL)
+     * -v (verbose), -d (debug)
+   - nessus: 
+     * Similar to OpenVAS with web interface
+     * Use web interface for configuration
+   - lynis: 
+     * audit system
+     * --pentest (pentest mode)
+     * --quick (quick mode)
+     * --profile (profile)
+     * --tests (test categories)
+     * --no-log (no logging)
+     * --quiet (quiet mode)
+     * --report-file (report file)
+     * --cronjob (cron mode)
 
 4. Exploitation:
-   - metasploit: use (module), set (option), exploit/run, sessions
-   - sqlmap: -u (URL), --data (POST data), --dbms (database type), --dump
-   - hydra: -l/-L (login), -p/-P (password), -t (tasks), service://server
+   - metasploit: 
+     * use (module), set (option)
+     * exploit/run, sessions
+     * show options, show targets
+     * setg (global options)
+     * unsetg (unset global)
+     * save (save settings)
+     * route (add route)
+     * jobs (manage jobs)
+     * resource (run script)
+   - sqlmap: 
+     * -u (URL), --data (POST data)
+     * --dbms (database type)
+     * --dump, --tables
+     * --columns, --schema
+     * --batch (non-interactive)
+     * --level (test level)
+     * --risk (risk level)
+     * --threads (threads)
+     * --proxy (proxy)
+     * --tor (use Tor)
+   - hydra: 
+     * -l/-L (login)
+     * -p/-P (password)
+     * -t (tasks)
+     * service://server
+     * -s (port)
+     * -e (empty password)
+     * -C (combo file)
+     * -M (target file)
+     * -o (output file)
+     * -f (exit on first match)
 
 5. Reconnaissance:
-   - whois: [domain], -h (host)
-   - theHarvester: -d (domain), -b (source), -l (limit)
-   - recon-ng: use (module), set (option), run
-   - maltego: GUI-based with transforms
+   - whois: 
+     * [domain], -h (host)
+     * -H (hide legal)
+     * -p (port)
+     * -r (referral)
+     * -R (no referral)
+     * -a (all sources)
+     * -b (brief)
+     * -g (source)
+     * -i (inverse)
+   - theHarvester: 
+     * -d (domain)
+     * -b (source)
+     * -l (limit)
+     * -s (start)
+     * -g (google dork)
+     * -e (email)
+     * -n (dns lookup)
+     * -t (dns tld)
+     * -p (port scan)
+     * -v (verify host)
+   - recon-ng: 
+     * use (module)
+     * set (option)
+     * run
+     * show options
+     * show info
+     * show modules
+     * show workspaces
+     * add domains
+     * add companies
+     * add contacts
+   - maltego: 
+     * GUI-based with transforms
+     * Use transforms for data gathering
+     * Export results
+     * Import data
+     * Create custom transforms
 
 6. Password attacks:
-   - hashcat: -m (hash type), -a (attack mode), -o (output file)
-   - john: --wordlist (wordlist file), --rules, --format (hash type)
-   - crunch: [min] [max] [charset], -t (pattern), -o (output)
+   - hashcat: 
+     * -m (hash type)
+     * -a (attack mode)
+     * -o (output file)
+     * -w (workload)
+     * -n (threads)
+     * -u (devices)
+     * -D (device type)
+     * -O (optimized)
+     * -r (rules)
+     * -i (increment)
+   - john: 
+     * --wordlist (wordlist file)
+     * --rules, --format (hash type)
+     * --show (show cracked)
+     * --users (users)
+     * --groups (groups)
+     * --shells (shells)
+     * --incremental (incremental)
+     * --external (external mode)
+     * --stdout (stdout)
+     * --session (session)
+   - crunch: 
+     * [min] [max] [charset]
+     * -t (pattern)
+     * -o (output)
+     * -b (size)
+     * -c (number)
+     * -d (duplicates)
+     * -e (stop)
+     * -f (charset file)
+     * -i (invert)
+     * -l (literal)
+     * -m (merge)
+     * -p (permutation)
+     * -q (quiet)
+     * -r (resume)
+     * -s (start)
+     * -t (pattern)
+     * -u (uncompress)
+     * -z (compress)
 
 7. Wireless:
-   - aircrack-ng: -w (wordlist), -b (BSSID)
-   - wifite: -wpa (attack WPA), -wep (attack WEP), -wps (attack WPS)
-   - kismet: -c (interface), -f (file), -s (server mode)
+   - aircrack-ng: 
+     * -w (wordlist)
+     * -b (BSSID)
+     * -e (ESSID)
+     * -q (quiet)
+     * -f (fudge factor)
+     * -m (MAC)
+     * -n (nbits)
+     * -c (channel)
+     * -i (interface)
+     * -p (PTW)
+   - wifite: 
+     * -wpa (attack WPA)
+     * -wep (attack WEP)
+     * -wps (attack WPS)
+     * -i (interface)
+     * -c (channel)
+     * -b (bssid)
+     * -e (essid)
+     * -p (power)
+     * -d (dict)
+     * -aircrack
+     * -pyrit
+     * -reaver
+     * -bully
+   - kismet: 
+     * -c (interface)
+     * -f (file)
+     * -s (server mode)
+     * -p (port)
+     * -n (no name)
+     * -v (verbose)
+     * -q (quiet)
+     * -t (timeout)
+     * -d (debug)
+     * -h (help)
 
 8. Forensics and analysis:
-   - volatility: -f (file), --profile (OS profile), plugin commands
-   - autopsy: GUI-based forensic platform
-   - wireshark/tshark: -i (interface), -c (packet count), -r (read file)
-   - tcpdump: -i (interface), -n (don't resolve), -w (write to file)
+   - volatility: 
+     * -f (file)
+     * --profile (OS profile)
+     * plugin commands
+     * --plugins (plugins)
+     * --info (info)
+     * --cache (cache)
+     * --debug (debug)
+     * --output (output)
+     * --output-file (file)
+     * --output-dir (dir)
+   - autopsy: 
+     * GUI-based forensic platform
+     * Case management
+     * Timeline analysis
+     * Keyword search
+     * File analysis
+     * Registry analysis
+     * Web artifacts
+     * Email analysis
+     * Report generation
+   - wireshark/tshark: 
+     * -i (interface)
+     * -c (packet count)
+     * -r (read file)
+     * -w (write file)
+     * -f (capture filter)
+     * -Y (display filter)
+     * -n (no name resolution)
+     * -N (name resolution)
+     * -d (decode as)
+     * -T (output format)
+   - tcpdump: 
+     * -i (interface)
+     * -n (don't resolve)
+     * -w (write to file)
+     * -r (read from file)
+     * -c (count)
+     * -s (snaplen)
+     * -v (verbose)
+     * -vv (more verbose)
+     * -X (hex and ASCII)
+     * -A (ASCII)
 
 9. Specialized tools:
-   - binwalk: -e (extract), -M (recursive scan)
-   - steghide: embed/extract, -sf (stego file), -p (passphrase)
-   - macchanger: -r (random MAC), -m (specified MAC)
-   - enum4linux: -a (all enumeration), -u (user), -p (pass)
-   - msfvenom: -p (payload), -f (format), -e (encoder)
+   - binwalk: 
+     * -e (extract)
+     * -M (recursive scan)
+     * -D (dd extraction)
+     * -C (directory)
+     * -j (size)
+     * -l (length)
+     * -q (quiet)
+     * -v (verbose)
+     * -f (log file)
+     * -r (raw)
+   - steghide: 
+     * embed/extract
+     * -sf (stego file)
+     * -p (passphrase)
+     * -cf (cover file)
+     * -ef (embed file)
+     * -e (encryption)
+     * -z (compression)
+     * -t (embed type)
+     * -f (force)
+     * -q (quiet)
+   - macchanger: 
+     * -r (random MAC)
+     * -m (specified MAC)
+     * -e (end MAC)
+     * -p (permanent)
+     * -A (another)
+     * -R (random)
+     * -l (list vendors)
+     * -s (show)
+     * -v (verbose)
+     * -h (help)
+   - enum4linux: 
+     * -a (all enumeration)
+     * -u (user)
+     * -p (pass)
+     * -P (port)
+     * -G (group)
+     * -S (share)
+     * -o (OS)
+     * -i (info)
+     * -n (name)
+     * -w (workgroup)
+   - msfvenom: 
+     * -p (payload)
+     * -f (format)
+     * -e (encoder)
+     * -a (arch)
+     * --platform (platform)
+     * -o (output)
+     * -b (bad chars)
+     * -i (iterations)
+     * -x (template)
+     * -k (keep template)
+
+IMPORTANT SCANNING GUIDELINES:
+1. NEVER use -p- in nmap scans as it takes too long
+2. Always start with common ports (1-1024) or specific service ports
+3. Use -sS (stealth scan) by default
+4. Add -sV only after finding open ports
+5. Use -Pn if host is blocking ping
+6. For web services, scan ports 80,443,8080 first
+7. For common services, scan ports 21,22,23,25,53,110,143,445,3389
+8. Use appropriate timing templates (-T4 for most scans)
+9. Set reasonable timeouts and retry limits
+10. Use parallel scanning when appropriate
+11. Consider using masscan for very large networks
+12. Always respect rate limits and network policies
 
 Design your commands to work sequentially as a workflow, where later commands build on the results of earlier ones.
 For commands that need input from previous commands, use placeholders like <target_ip> or <discovered_hosts>.
