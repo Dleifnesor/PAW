@@ -191,7 +191,7 @@ class PAW:
                         json={
                             "model": MODEL,
                             "prompt": prompt,
-                            "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Your job is to help users perform cybersecurity tasks by translating natural language requests into a sequence of commands. For each request, output a JSON object with the following structure: {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. The 'plan' should outline the steps to achieve the user's goal, 'commands' should list the actual Linux commands to execute (one per line), and 'explanation' should provide context for what each command does.",
+                            "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Output JSON with {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. Be concise and focus on practical commands.",
                             "stream": False,
                         },
                         timeout=LLM_TIMEOUT
@@ -203,7 +203,7 @@ class PAW:
                     json={
                         "model": MODEL,
                         "prompt": prompt,
-                        "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Your job is to help users perform cybersecurity tasks by translating natural language requests into a sequence of commands. For each request, output a JSON object with the following structure: {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. The 'plan' should outline the steps to achieve the user's goal, 'commands' should list the actual Linux commands to execute (one per line), and 'explanation' should provide context for what each command does.",
+                        "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Output JSON with {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. Be concise and focus on practical commands.",
                         "stream": False,
                     },
                     timeout=LLM_TIMEOUT
@@ -703,11 +703,29 @@ COMMAND OUTPUT:
 Available variables detected:
 {json.dumps(variables, indent=2)}
 
-IMPORTANT NOTES:
-- If the previous command indicates the host is down or unreachable, suggest a command to troubleshoot connectivity or try an alternative approach.
-- If the previous command was nmap and showed the host is down, suggest adding -Pn flag.
-- Do not use <your_ip> placeholders in commands, directly use the detected local IP.
-- Always adapt based on previous output and errors.
+IMPORTANT NOTES FOR SCANNING AND SECURITY:
+1. Host Status Handling:
+   - If host is down/unreachable: Try -Pn flag with nmap or ping sweep first
+   - If no response: Consider firewall evasion techniques (-f, -sS, etc.)
+   - Always verify target is legitimate and authorized
+
+2. Port Scanning Strategy:
+   - Start with basic port scan (-p-) if no ports known
+   - Use service detection (-sV) on open ports
+   - Consider timing (-T4) and intensity based on target
+   - Use NSE scripts for deeper analysis
+
+3. Command Adaptation:
+   - Analyze previous output for errors and warnings
+   - Adjust scan intensity if timeouts occur
+   - Use variables from previous results (ports, services, etc.)
+   - Don't repeat failed approaches
+
+4. Security Best Practices:
+   - Validate target is authorized
+   - Start with less intrusive scans first
+   - Respect target system limitations
+   - Consider stealth when appropriate
 
 Based on the previous command and its output, generate the next most logical command to continue this workflow.
 Respond with a JSON object containing:
@@ -940,386 +958,17 @@ As PAW (Prompt Assisted Workflow), analyze this cybersecurity request and provid
 
 REQUEST: {request}
 
-Consider the following Kali Linux tools and their key options when appropriate:
+Consider common Kali Linux tools for this task. Design your commands to work sequentially as a workflow.
+Focus on appropriate scanning options and techniques for the specific target types.
+For commands that need input from previous commands, use placeholders like <target_ip>.
 
-1. Network scanning:
-   - nmap: 
-     * NEVER use -p- (full port scan) as it takes too long
-     * Use -p 1-1024 for common ports
-     * Use -p 80,443,8080 for web services
-     * Use -p 21,22,23,25,53,110,143,445,3389 for common services
-     * Use -sS (stealth scan), -sV (version detection), -O (OS detection), -A (aggressive)
-     * Use -Pn (skip discovery) if host is blocking ping
-     * Use -T4 for faster scanning (T0-T5, where T4 is aggressive)
-     * Use --min-rate 1000 for minimum packet rate
-     * Use --max-retries 2 to limit retransmissions
-     * Use --script=vuln for vulnerability scanning
-     * Use --script=safe for safe scripts
-     * Use --script-args=unsafe=1 for unsafe scripts
-     * Use --script-timeout 30s for script timeout
-     * Use --host-timeout 5m for host timeout
-     * Use --min-parallelism 100 for parallel probes
-     * Use --max-parallelism 1024 for max parallel probes
-     * Use --min-hostgroup 256 for host grouping
-     * Use --max-hostgroup 1024 for max host grouping
-   - masscan: 
-     * -p (ports), --rate (packets per second)
-     * --range (scan range), --banners (capture banners)
-     * --adapter-ip (specify source IP)
-     * --adapter-port (specify source port)
-     * --adapter-mac (specify source MAC)
-     * --wait (seconds to wait after sending packets)
-     * --retries (number of retries)
-     * --ping (ICMP echo request)
-     * --router-mac (specify router MAC)
-   - netdiscover: 
-     * -r (range), -i (interface), -p (passive mode)
-     * -f (fast mode), -s (sleep time)
-     * -c (count), -L (ignore local)
-     * -P (print results), -S (hardware scan)
-     * -n (no name resolution)
+Important Scanning Notes:
+- Use common ports (1-1024) or specific service ports, avoid full port scans (-p-)
+- For web services, focus on ports 80,443,8080
+- Start with basic scans, then progress to more detailed analysis
+- Adapt based on target response (use -Pn if host blocks ping)
+- Use reasonable timing templates (e.g., -T4) and timeouts
 
-2. Web scanning:
-   - nikto: 
-     * -h (host), -port (port to scan)
-     * -ssl, -Tuning (scan tuning)
-     * -Cgidirs (CGI directories)
-     * -Display (output format)
-     * -Format (output format)
-     * -Plugins (plugin selection)
-     * -Single (single request)
-     * -timeout (timeout in seconds)
-     * -useproxy (use proxy)
-     * -vhost (virtual host)
-   - dirb: 
-     * [url] [wordlist]
-     * -a (user agent), -z (delay)
-     * -o (output file), -p (proxy)
-     * -r (not recursive), -R (recursive)
-     * -S (silent), -t (threads)
-     * -u (username), -P (password)
-     * -X (extensions), -H (headers)
-   - gobuster: 
-     * -u (url), -w (wordlist)
-     * -x (extensions), -t (threads)
-     * -c (cookies), -H (headers)
-     * -k (skip SSL verify)
-     * -n (no status), -q (quiet)
-     * -s (status codes)
-     * -timeout (timeout)
-     * -proxy (proxy)
-     * -wildcard (wildcard test)
-   - wpscan: 
-     * --url (WordPress URL)
-     * --api-token, -e (enumerate)
-     * --enumerate (what to enumerate)
-     * --plugins-detection (plugin detection)
-     * --plugins-version-detection
-     * --themes-detection
-     * --themes-version-detection
-     * --timthumbs
-     * --config-backups
-     * --db-exports
-     * --medias-detection
-     * --users-detection
-     * --passwords
-
-3. Vulnerability scanning:
-   - openvas: 
-     * -u (user), -p (password)
-     * -T (target), -P (port)
-     * -c (config), -q (quiet)
-     * -R (report), -f (format)
-     * -i (input), -o (output)
-     * -x (xml), -X (XSL)
-     * -v (verbose), -d (debug)
-   - nessus: 
-     * Similar to OpenVAS with web interface
-     * Use web interface for configuration
-   - lynis: 
-     * audit system
-     * --pentest (pentest mode)
-     * --quick (quick mode)
-     * --profile (profile)
-     * --tests (test categories)
-     * --no-log (no logging)
-     * --quiet (quiet mode)
-     * --report-file (report file)
-     * --cronjob (cron mode)
-
-4. Exploitation:
-   - metasploit: 
-     * use (module), set (option)
-     * exploit/run, sessions
-     * show options, show targets
-     * setg (global options)
-     * unsetg (unset global)
-     * save (save settings)
-     * route (add route)
-     * jobs (manage jobs)
-     * resource (run script)
-   - sqlmap: 
-     * -u (URL), --data (POST data)
-     * --dbms (database type)
-     * --dump, --tables
-     * --columns, --schema
-     * --batch (non-interactive)
-     * --level (test level)
-     * --risk (risk level)
-     * --threads (threads)
-     * --proxy (proxy)
-     * --tor (use Tor)
-   - hydra: 
-     * -l/-L (login)
-     * -p/-P (password)
-     * -t (tasks)
-     * service://server
-     * -s (port)
-     * -e (empty password)
-     * -C (combo file)
-     * -M (target file)
-     * -o (output file)
-     * -f (exit on first match)
-
-5. Reconnaissance:
-   - whois: 
-     * [domain], -h (host)
-     * -H (hide legal)
-     * -p (port)
-     * -r (referral)
-     * -R (no referral)
-     * -a (all sources)
-     * -b (brief)
-     * -g (source)
-     * -i (inverse)
-   - theHarvester: 
-     * -d (domain)
-     * -b (source)
-     * -l (limit)
-     * -s (start)
-     * -g (google dork)
-     * -e (email)
-     * -n (dns lookup)
-     * -t (dns tld)
-     * -p (port scan)
-     * -v (verify host)
-   - recon-ng: 
-     * use (module)
-     * set (option)
-     * run
-     * show options
-     * show info
-     * show modules
-     * show workspaces
-     * add domains
-     * add companies
-     * add contacts
-   - maltego: 
-     * GUI-based with transforms
-     * Use transforms for data gathering
-     * Export results
-     * Import data
-     * Create custom transforms
-
-6. Password attacks:
-   - hashcat: 
-     * -m (hash type)
-     * -a (attack mode)
-     * -o (output file)
-     * -w (workload)
-     * -n (threads)
-     * -u (devices)
-     * -D (device type)
-     * -O (optimized)
-     * -r (rules)
-     * -i (increment)
-   - john: 
-     * --wordlist (wordlist file)
-     * --rules, --format (hash type)
-     * --show (show cracked)
-     * --users (users)
-     * --groups (groups)
-     * --shells (shells)
-     * --incremental (incremental)
-     * --external (external mode)
-     * --stdout (stdout)
-     * --session (session)
-   - crunch: 
-     * [min] [max] [charset]
-     * -t (pattern)
-     * -o (output)
-     * -b (size)
-     * -c (number)
-     * -d (duplicates)
-     * -e (stop)
-     * -f (charset file)
-     * -i (invert)
-     * -l (literal)
-     * -m (merge)
-     * -p (permutation)
-     * -q (quiet)
-     * -r (resume)
-     * -s (start)
-     * -t (pattern)
-     * -u (uncompress)
-     * -z (compress)
-
-7. Wireless:
-   - aircrack-ng: 
-     * -w (wordlist)
-     * -b (BSSID)
-     * -e (ESSID)
-     * -q (quiet)
-     * -f (fudge factor)
-     * -m (MAC)
-     * -n (nbits)
-     * -c (channel)
-     * -i (interface)
-     * -p (PTW)
-   - wifite: 
-     * -wpa (attack WPA)
-     * -wep (attack WEP)
-     * -wps (attack WPS)
-     * -i (interface)
-     * -c (channel)
-     * -b (bssid)
-     * -e (essid)
-     * -p (power)
-     * -d (dict)
-     * -aircrack
-     * -pyrit
-     * -reaver
-     * -bully
-   - kismet: 
-     * -c (interface)
-     * -f (file)
-     * -s (server mode)
-     * -p (port)
-     * -n (no name)
-     * -v (verbose)
-     * -q (quiet)
-     * -t (timeout)
-     * -d (debug)
-     * -h (help)
-
-8. Forensics and analysis:
-   - volatility: 
-     * -f (file)
-     * --profile (OS profile)
-     * plugin commands
-     * --plugins (plugins)
-     * --info (info)
-     * --cache (cache)
-     * --debug (debug)
-     * --output (output)
-     * --output-file (file)
-     * --output-dir (dir)
-   - autopsy: 
-     * GUI-based forensic platform
-     * Case management
-     * Timeline analysis
-     * Keyword search
-     * File analysis
-     * Registry analysis
-     * Web artifacts
-     * Email analysis
-     * Report generation
-   - wireshark/tshark: 
-     * -i (interface)
-     * -c (packet count)
-     * -r (read file)
-     * -w (write file)
-     * -f (capture filter)
-     * -Y (display filter)
-     * -n (no name resolution)
-     * -N (name resolution)
-     * -d (decode as)
-     * -T (output format)
-   - tcpdump: 
-     * -i (interface)
-     * -n (don't resolve)
-     * -w (write to file)
-     * -r (read from file)
-     * -c (count)
-     * -s (snaplen)
-     * -v (verbose)
-     * -vv (more verbose)
-     * -X (hex and ASCII)
-     * -A (ASCII)
-
-9. Specialized tools:
-   - binwalk: 
-     * -e (extract)
-     * -M (recursive scan)
-     * -D (dd extraction)
-     * -C (directory)
-     * -j (size)
-     * -l (length)
-     * -q (quiet)
-     * -v (verbose)
-     * -f (log file)
-     * -r (raw)
-   - steghide: 
-     * embed/extract
-     * -sf (stego file)
-     * -p (passphrase)
-     * -cf (cover file)
-     * -ef (embed file)
-     * -e (encryption)
-     * -z (compression)
-     * -t (embed type)
-     * -f (force)
-     * -q (quiet)
-   - macchanger: 
-     * -r (random MAC)
-     * -m (specified MAC)
-     * -e (end MAC)
-     * -p (permanent)
-     * -A (another)
-     * -R (random)
-     * -l (list vendors)
-     * -s (show)
-     * -v (verbose)
-     * -h (help)
-   - enum4linux: 
-     * -a (all enumeration)
-     * -u (user)
-     * -p (pass)
-     * -P (port)
-     * -G (group)
-     * -S (share)
-     * -o (OS)
-     * -i (info)
-     * -n (name)
-     * -w (workgroup)
-   - msfvenom: 
-     * -p (payload)
-     * -f (format)
-     * -e (encoder)
-     * -a (arch)
-     * --platform (platform)
-     * -o (output)
-     * -b (bad chars)
-     * -i (iterations)
-     * -x (template)
-     * -k (keep template)
-
-IMPORTANT SCANNING GUIDELINES:
-1. NEVER use -p- in nmap scans as it takes too long
-2. Always start with common ports (1-1024) or specific service ports
-3. Use -sS (stealth scan) by default
-4. Add -sV only after finding open ports
-5. Use -Pn if host is blocking ping
-6. For web services, scan ports 80,443,8080 first
-7. For common services, scan ports 21,22,23,25,53,110,143,445,3389
-8. Use appropriate timing templates (-T4 for most scans)
-9. Set reasonable timeouts and retry limits
-10. Use parallel scanning when appropriate
-11. Consider using masscan for very large networks
-12. Always respect rate limits and network policies
-
-Design your commands to work sequentially as a workflow, where later commands build on the results of earlier ones.
-For commands that need input from previous commands, use placeholders like <target_ip> or <discovered_hosts>.
 Provide the specific commands that would accomplish this task, explaining what each command does.
 """
         
