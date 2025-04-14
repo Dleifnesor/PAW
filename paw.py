@@ -471,7 +471,7 @@ class PAW:
                     while process.poll() is None:
                         # Check if we need to allow user to abort
                         elapsed = time.time() - start_time
-                        if elapsed > 10:  # After 10 seconds, show abort option
+                        if elapsed > 30:  # After 30 seconds, show abort option once
                             progress.stop()
                             if Confirm.ask(f"Command running for {int(elapsed)}s. Abort?", default=False):
                                 process.kill()
@@ -483,9 +483,9 @@ class PAW:
                                     "command": command,
                                     "variables": variables
                                 }
-                            # Resume progress and reset timer to wait another 10s before asking again
+                            # Resume progress and don't ask again
                             progress.start()
-                            start_time = time.time()
+                            break  # Exit the prompt loop after first check
                         
                         # Check for output
                         readable, _, _ = select.select([process.stdout, process.stderr], [], [], 0.5)
@@ -922,11 +922,14 @@ The command should directly use the values from the previous output when appropr
         # Override adaptive mode if specified
         if adaptive_override is not None:
             self.adaptive_mode = adaptive_override
+        else:
+            # Default to adaptive/progressive mode
+            self.adaptive_mode = True
             
         # Clean up the request
         request = request.replace('\r', '').strip()
         
-        # Generate LLM response
+        # Generate initial LLM response
         context = f"""
 As PAW (Prompt Assisted Workflow), analyze this cybersecurity request and provide a plan of action:
 
@@ -1002,7 +1005,7 @@ Provide the specific commands that would accomplish this task, explaining what e
         plan = response.get("plan", [])
         self.display_plan(plan)
         
-        # Get commands and explanations
+        # Get initial command and explanation
         commands = response.get("commands", [])
         explanations = response.get("explanation", [""] * len(commands))
         
@@ -1013,65 +1016,31 @@ Provide the specific commands that would accomplish this task, explaining what e
                 print("\033[1;33m[!] No commands were generated for this request.\033[0m")
             return
         
-        # Display proposed commands
-        if EXPLAIN_COMMANDS:
-            self.display_commands(commands, explanations)
-            
-            # Display mode indicator before command selection
-            if self.adaptive_mode:
-                if RICH_AVAILABLE:
-                    console.print(Panel(
-                        "[bold cyan]PROGRESSIVE MODE ACTIVE[/] - Commands will be executed one at a time",
-                        border_style=self.theme['border_style'],
-                        padding=(1, 2)
-                    ))
-                else:
-                    print("\n\033[1;36m[*] PROGRESSIVE MODE ACTIVE - Commands will be executed one at a time\033[0m")
-            
-            # Interactive command selection
-            commands, adaptive_mode = self.interactive_command_selection(commands, explanations)
-            
-            if not commands:
-                if RICH_AVAILABLE:
-                    console.print("[bold red]Execution cancelled[/]")
-                else:
-                    print("\n\033[1;31m[!] Execution cancelled\033[0m")
-                return
-        
-        # Execute commands
-        results = []
-        variables = {}  # Store variables for command chaining
-        
+        # Display mode indicator
         if RICH_AVAILABLE:
-            mode_str = "[bold cyan]Progressive Mode[/]" if self.adaptive_mode else "[bold]Sequential Mode[/]"
-            mode_description = "Commands will be executed ONE AT A TIME" if self.adaptive_mode else "All commands will run in sequence"
             console.print(Panel(
-                f"[bold]Executing Commands[/] in {mode_str}\n{mode_description}", 
-                border_style=self.theme['border_style']
+                "[bold cyan]PROGRESSIVE MODE ACTIVE[/] - Commands will be executed one at a time",
+                border_style=self.theme['border_style'],
+                padding=(1, 2)
             ))
         else:
-            mode_str = "Progressive Mode" if self.adaptive_mode else "Sequential Mode"
-            mode_description = "Commands will be executed ONE AT A TIME" if self.adaptive_mode else "All commands will run in sequence"
-            print(f"\n\033[1;34m[*] Executing commands in {mode_str}:\033[0m")
-            print(f"\033[1;34m[*] {mode_description}\033[0m")
+            print("\n\033[1;36m[*] PROGRESSIVE MODE ACTIVE - Commands will be executed one at a time\033[0m")
         
+        # Execute commands one at a time
+        results = []
+        variables = {}  # Store variables for command chaining
         command_index = 0
+        
         while command_index < len(commands):
             cmd = commands[command_index]
-            command_index += 1  # Increment for next command
+            command_index += 1
             
             if RICH_AVAILABLE:
-                if self.adaptive_mode:
-                    console.print(Panel(f"[bold yellow]Command {command_index}:[/] {cmd}", 
-                                       title="[bold cyan]Current Command[/]",
-                                       border_style=self.theme['border_style']))
-                else:
-                    console.print(f"[bold yellow]Command {command_index}/{len(commands)}:[/] {cmd}")
+                console.print(Panel(f"[bold yellow]Command {command_index}:[/] {cmd}", 
+                                   title="[bold cyan]Current Command[/]",
+                                   border_style=self.theme['border_style']))
             else:
-                if self.adaptive_mode:
-                    print(f"\n\033[1;33m[{command_index}] Executing:\033[0m {cmd}")
-                else:
-                    print(f"\n\033[1;33m[{command_index}/{len(commands)}] Executing:\033[0m {cmd}")
+                print(f"\n\033[1;33m[{command_index}] Executing:\033[0m {cmd}")
             
             # Execute with current variables from previous commands
             result = self.execute_command(cmd, variables)
@@ -1091,19 +1060,17 @@ Provide the specific commands that would accomplish this task, explaining what e
                     return
                 
                 if should_continue:  # User chose to retry with fix
-                    # Replace the failed result with retry result
                     result = retry_result
-                    # Update variables with any new ones from retry
                     variables = result["variables"]
             
             # Store the result for summary
             results.append(result)
             
             # Display result
-            self.display_result(result, command_index, len(commands) if not self.adaptive_mode else "?")
+            self.display_result(result, command_index, "?")
             
-            # In adaptive mode, generate the next command based on the current result
-            if self.adaptive_mode and result["exit_code"] == 0:
+            # Generate next command based on current result
+            if result["exit_code"] == 0:
                 # Format previous output for prompt
                 prev_output = f"STDOUT:\n{result['stdout']}\n\nSTDERR:\n{result['stderr']}"
                 

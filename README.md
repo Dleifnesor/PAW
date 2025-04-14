@@ -134,8 +134,22 @@ Each tool should follow this format:
 }
 ```
 
+### Contribution Guidelines
+
+If you'd like to contribute:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
 ## Troubleshooting
 
 - **Import errors**: Make sure PAW is installed correctly and its modules are in your Python path
 - **Missing tools**: Some tools may need to be installed separately if you're not using Kali Linux
 - **Permission issues**: Ensure you have write access to the PAW configuration directory
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
