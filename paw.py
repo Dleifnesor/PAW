@@ -38,10 +38,101 @@ sys.path.append('/usr/local/share/paw/lib')
 try:
     from ascii_art import display_ascii_art
     from tools_registry import get_tools_registry
+    from extensive_kali_tools import KALI_TOOLS, CATEGORIES
 except ImportError:
     # For development/local environment
     from ascii_art import display_ascii_art
     from tools_registry import get_tools_registry
+    try:
+        from extensive_kali_tools import KALI_TOOLS, CATEGORIES
+    except ImportError:
+        # Define fallback minimal tool data if extensive_kali_tools is not available
+        logger.warning("extensive_kali_tools module not found. Using basic tool information.")
+        
+        # Basic set of common Kali tools
+        KALI_TOOLS = [
+            {
+                "name": "nmap",
+                "category": "Information Gathering",
+                "description": "Network exploration tool and port scanner",
+                "examples": [
+                    {"description": "Basic scan", "command": "nmap 192.168.1.1"},
+                    {"description": "Service scan", "command": "nmap -sV 192.168.1.1"},
+                    {"description": "Aggressive scan", "command": "nmap -A 192.168.1.1"}
+                ]
+            },
+            {
+                "name": "nikto",
+                "category": "Web Application Analysis",
+                "description": "Web server scanner which performs tests against web servers",
+                "examples": [
+                    {"description": "Basic scan", "command": "nikto -h http://192.168.1.1"}
+                ]
+            },
+            {
+                "name": "dirb",
+                "category": "Web Application Analysis",
+                "description": "Web content scanner that looks for existing web objects",
+                "examples": [
+                    {"description": "Basic scan", "command": "dirb http://192.168.1.1"}
+                ]
+            },
+            {
+                "name": "hydra",
+                "category": "Password Attacks",
+                "description": "Password cracking tool supporting numerous protocols",
+                "examples": [
+                    {"description": "SSH attack", "command": "hydra -l admin -P wordlist.txt ssh://192.168.1.1"}
+                ]
+            },
+            {
+                "name": "sqlmap",
+                "category": "Web Application Analysis",
+                "description": "Automatic SQL injection tool",
+                "examples": [
+                    {"description": "Basic scan", "command": "sqlmap -u \"http://192.168.1.1/page.php?id=1\""}
+                ]
+            },
+            {
+                "name": "wireshark",
+                "category": "Sniffing & Spoofing",
+                "description": "Network protocol analyzer",
+                "examples": [
+                    {"description": "Capture on interface", "command": "wireshark -i eth0"}
+                ]
+            },
+            {
+                "name": "metasploit",
+                "category": "Exploitation Tools",
+                "description": "Framework for developing, testing, and executing exploits",
+                "examples": [
+                    {"description": "Start console", "command": "msfconsole"}
+                ]
+            },
+            {
+                "name": "aircrack-ng",
+                "category": "Wireless Attacks",
+                "description": "Suite of tools for wireless network security assessments",
+                "examples": [
+                    {"description": "Check interface", "command": "airmon-ng"}
+                ]
+            }
+        ]
+        
+        CATEGORIES = [
+            "Information Gathering",
+            "Vulnerability Analysis",
+            "Web Application Analysis",
+            "Database Assessment",
+            "Password Attacks",
+            "Wireless Attacks",
+            "Reverse Engineering",
+            "Exploitation Tools",
+            "Sniffing & Spoofing",
+            "Post Exploitation",
+            "Forensics",
+            "Reporting Tools"
+        ]
 
 # Set up logging
 logging.basicConfig(
@@ -169,6 +260,108 @@ class PAW:
         
         # Get config for adaptive mode
         self.adaptive_mode = config['DEFAULT'].getboolean('adaptive_mode', False)
+        
+        # Cache for tool information
+        self.tool_info_cache = {}
+    
+    def get_relevant_tools_for_request(self, request):
+        """Dynamically extract relevant tool information based on the user request"""
+        # Use a cache to prevent regenerating for the same request
+        if request in self.tool_info_cache:
+            return self.tool_info_cache[request]
+            
+        relevant_tools = []
+        request_lower = request.lower()
+        
+        # Keywords that map to categories
+        category_keywords = {
+            "scan": ["Information Gathering", "Vulnerability Analysis"],
+            "network": ["Information Gathering", "Sniffing & Spoofing"],
+            "web": ["Web Application Analysis", "Information Gathering"],
+            "vulnerability": ["Vulnerability Analysis"],
+            "exploit": ["Exploitation Tools"],
+            "password": ["Password Attacks"],
+            "wireless": ["Wireless Attacks"],
+            "reverse": ["Reverse Engineering"],
+            "forensic": ["Forensics"],
+            "database": ["Database Assessment"],
+            "recon": ["Information Gathering", "Reconnaissance"],
+            "brute": ["Password Attacks"],
+            "crack": ["Password Attacks"],
+            "sniff": ["Sniffing & Spoofing"],
+            "spoof": ["Sniffing & Spoofing"],
+            "footprint": ["Information Gathering"],
+            "enumerate": ["Information Gathering"],
+            "social": ["Social Engineering Tools"]
+        }
+        
+        # Common tools to always include
+        important_tools = ["nmap", "hydra", "sqlmap", "metasploit", "dirb", "nikto", "wireshark", "hashcat"]
+        
+        # Find matching categories based on request keywords
+        matching_categories = set()
+        for keyword, categories in category_keywords.items():
+            if keyword in request_lower:
+                for category in categories:
+                    matching_categories.add(category)
+        
+        # If no categories match, include a default set
+        if not matching_categories:
+            matching_categories = {"Information Gathering", "Vulnerability Analysis"}
+            
+        # Select tools from matching categories
+        tools_added = set()
+        for tool in KALI_TOOLS:
+            # Always include important tools
+            if tool["name"] in important_tools and tool["name"] not in tools_added:
+                relevant_tools.append(tool)
+                tools_added.add(tool["name"])
+                continue
+                
+            # Include tools from matching categories
+            if tool["category"] in matching_categories and tool["name"] not in tools_added:
+                relevant_tools.append(tool)
+                tools_added.add(tool["name"])
+                
+            # Include tools specifically mentioned in the request
+            if tool["name"] in request_lower and tool["name"] not in tools_added:
+                relevant_tools.append(tool)
+                tools_added.add(tool["name"])
+                
+        # Cache the result
+        self.tool_info_cache[request] = relevant_tools
+        return relevant_tools
+    
+    def format_tools_for_context(self, tools):
+        """Format tool information for inclusion in the LLM context"""
+        if not tools:
+            return "No specific tools identified for this request."
+            
+        formatted_text = "Available Kali Linux Tools for this task:\n\n"
+        
+        # Group tools by category
+        tools_by_category = {}
+        for tool in tools:
+            category = tool["category"]
+            if category not in tools_by_category:
+                tools_by_category[category] = []
+            tools_by_category[category].append(tool)
+            
+        # Format each category and its tools
+        for category, category_tools in tools_by_category.items():
+            formatted_text += f"{category}:\n"
+            for tool in category_tools:
+                formatted_text += f"  - {tool['name']}: {tool['description']}\n"
+                
+                # Add example commands if available
+                if "examples" in tool and tool["examples"]:
+                    formatted_text += "    Examples:\n"
+                    # Limit to 3 examples to keep context manageable
+                    for i, example in enumerate(tool["examples"][:3]):
+                        formatted_text += f"      * {example['description']}: {example['command']}\n"
+                formatted_text += "\n"
+        
+        return formatted_text
     
     def generate_llm_response(self, prompt):
         """Generate a response from the LLM using Ollama."""
@@ -191,7 +384,7 @@ class PAW:
                         json={
                             "model": MODEL,
                             "prompt": prompt,
-                            "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Output JSON with {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. Be concise and focus on practical commands.",
+                            "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. You can access detailed information about security tools by using the special syntax: [TOOL:tool_name] or [CATEGORY:category_name]. Output JSON with {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. Be concise and focus on practical commands.",
                             "stream": False,
                         },
                         timeout=LLM_TIMEOUT
@@ -203,7 +396,7 @@ class PAW:
                     json={
                         "model": MODEL,
                         "prompt": prompt,
-                        "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Output JSON with {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. Be concise and focus on practical commands.",
+                        "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. You can access detailed information about security tools by using the special syntax: [TOOL:tool_name] or [CATEGORY:category_name]. Output JSON with {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. Be concise and focus on practical commands.",
                         "stream": False,
                     },
                     timeout=LLM_TIMEOUT
@@ -214,7 +407,17 @@ class PAW:
                 return {"error": f"Ollama API error: {response.status_code}"}
             
             result = response.json()
-            return self.extract_json_from_response(result.get("response", ""))
+            response_text = result.get("response", "")
+            
+            # Process any tool queries in the response
+            processed_response = self.process_tool_queries(response_text)
+            
+            # If tool queries were found, send the processed response back to the LLM
+            if processed_response != response_text:
+                logger.info("Tool queries detected, sending follow-up request")
+                return self.generate_llm_response(processed_response)
+            
+            return self.extract_json_from_response(response_text)
             
         except httpx.TimeoutException:
             logger.error(f"LLM request timed out after {LLM_TIMEOUT} seconds")
@@ -222,6 +425,101 @@ class PAW:
         except Exception as e:
             logger.error(f"Error generating LLM response: {e}")
             return {"error": str(e)}
+    
+    def process_tool_queries(self, text):
+        """Process any tool or category queries in the text and replace with actual tool information."""
+        # Check for tool queries using [TOOL:tool_name] syntax
+        tool_pattern = r'\[TOOL:(.*?)\]'
+        tool_queries = re.findall(tool_pattern, text)
+        
+        # Check for category queries using [CATEGORY:category_name] syntax
+        category_pattern = r'\[CATEGORY:(.*?)\]'
+        category_queries = re.findall(category_pattern, text)
+        
+        # If no queries found, return the original text
+        if not tool_queries and not category_queries:
+            return text
+            
+        # Process tool queries
+        for tool_name in tool_queries:
+            tool_name = tool_name.strip().lower()
+            tool_info = self.get_tool_info(tool_name)
+            text = text.replace(f"[TOOL:{tool_name}]", tool_info)
+            
+        # Process category queries
+        for category_name in category_queries:
+            category_name = category_name.strip()
+            category_info = self.get_category_info(category_name)
+            text = text.replace(f"[CATEGORY:{category_name}]", category_info)
+            
+        return text
+        
+    def get_tool_info(self, tool_name):
+        """Get detailed information about a specific tool."""
+        for tool in KALI_TOOLS:
+            if tool["name"].lower() == tool_name.lower():
+                tool_info = f"TOOL: {tool['name']} ({tool['category']})\n"
+                tool_info += f"DESCRIPTION: {tool['description']}\n"
+                
+                if "common_usage" in tool:
+                    tool_info += f"USAGE: {tool['common_usage']}\n"
+                    
+                if "examples" in tool and tool["examples"]:
+                    tool_info += "EXAMPLES:\n"
+                    for example in tool["examples"][:5]:  # Limit to 5 examples
+                        tool_info += f"- {example['description']}: {example['command']}\n"
+                        
+                return tool_info
+                
+        # If tool not found
+        similar_tools = []
+        for tool in KALI_TOOLS:
+            if tool_name in tool["name"].lower() or tool["name"].lower() in tool_name:
+                similar_tools.append(tool["name"])
+                
+        if similar_tools:
+            return f"Tool '{tool_name}' not found. Did you mean: {', '.join(similar_tools)}?"
+        else:
+            return f"Tool '{tool_name}' not found in the database."
+            
+    def get_category_info(self, category_name):
+        """Get information about tools in a specific category."""
+        category_info = ""
+        category_tools = []
+        
+        # Try to find exact category match
+        for category in CATEGORIES:
+            if category.lower() == category_name.lower():
+                category_name = category  # Use proper case
+                break
+                
+        # Find tools in this category
+        for tool in KALI_TOOLS:
+            if tool["category"].lower() == category_name.lower():
+                category_tools.append(tool)
+                
+        if category_tools:
+            category_info = f"CATEGORY: {category_name}\n"
+            category_info += f"Available Tools ({len(category_tools)}):\n"
+            
+            for tool in category_tools[:10]:  # Limit to 10 tools per category
+                category_info += f"- {tool['name']}: {tool['description']}\n"
+                
+            if len(category_tools) > 10:
+                category_info += f"... and {len(category_tools) - 10} more tools\n"
+        else:
+            # If category not found, suggest similar categories
+            similar_categories = []
+            for category in CATEGORIES:
+                if category_name.lower() in category.lower():
+                    similar_categories.append(category)
+                    
+            if similar_categories:
+                category_info = f"Category '{category_name}' not found. Did you mean: {', '.join(similar_categories)}?"
+            else:
+                category_info = f"Category '{category_name}' not found. Available categories: {', '.join(CATEGORIES[:5])}..."
+                
+        return category_info
     
     def extract_json_from_response(self, text):
         """Extract JSON from the LLM response."""
@@ -703,6 +1001,10 @@ COMMAND OUTPUT:
 Available variables detected:
 {json.dumps(variables, indent=2)}
 
+You have access to a comprehensive database of Kali Linux security tools. To look up information about specific tools or categories, use these special commands:
+- [TOOL:tool_name] - Get detailed information about a specific tool (e.g., [TOOL:nmap])
+- [CATEGORY:category_name] - See available tools in a category (e.g., [CATEGORY:Information Gathering])
+
 IMPORTANT NOTES FOR SCANNING AND SECURITY:
 1. Host Status Handling:
    - If host is down/unreachable: Try -Pn flag with nmap or ping sweep first
@@ -710,7 +1012,7 @@ IMPORTANT NOTES FOR SCANNING AND SECURITY:
    - Always verify target is legitimate and authorized
 
 2. Port Scanning Strategy:
-   - Start with basic port scan (-p-) if no ports known
+   - Start with basic port scan if no ports known
    - Use service detection (-sV) on open ports
    - Consider timing (-T4) and intensity based on target
    - Use NSE scripts for deeper analysis
@@ -720,12 +1022,6 @@ IMPORTANT NOTES FOR SCANNING AND SECURITY:
    - Adjust scan intensity if timeouts occur
    - Use variables from previous results (ports, services, etc.)
    - Don't repeat failed approaches
-
-4. Security Best Practices:
-   - Validate target is authorized
-   - Start with less intrusive scans first
-   - Respect target system limitations
-   - Consider stealth when appropriate
 
 Based on the previous command and its output, generate the next most logical command to continue this workflow.
 Respond with a JSON object containing:
@@ -952,22 +1248,33 @@ The command should directly use the values from the previous output when appropr
         # Clean up the request
         request = request.replace('\r', '').strip()
         
-        # Generate initial LLM response
+        # Generate initial LLM response with tool-querying capability
         context = f"""
 As PAW (Prompt Assisted Workflow), analyze this cybersecurity request and provide a plan of action:
 
 REQUEST: {request}
 
-Consider common Kali Linux tools for this task. Design your commands to work sequentially as a workflow.
-Focus on appropriate scanning options and techniques for the specific target types.
-For commands that need input from previous commands, use placeholders like <target_ip>.
+You have access to a comprehensive database of Kali Linux security tools. To look up information about specific tools or categories, use these special commands:
+- [TOOL:tool_name] - Get detailed information about a specific tool (e.g., [TOOL:nmap])
+- [CATEGORY:category_name] - See available tools in a category (e.g., [CATEGORY:Information Gathering])
 
-Important Scanning Notes:
-- Use common ports (1-1024) or specific service ports, avoid full port scans (-p-)
-- For web services, focus on ports 80,443,8080
-- Start with basic scans, then progress to more detailed analysis
-- Adapt based on target response (use -Pn if host blocks ping)
-- Use reasonable timing templates (e.g., -T4) and timeouts
+Available categories include: Information Gathering, Vulnerability Analysis, Web Application Analysis, 
+Database Assessment, Password Attacks, Wireless Attacks, Exploitation Tools, Sniffing & Spoofing, 
+Reverse Engineering, and more.
+
+Common tools include: nmap, nikto, dirb, hydra, sqlmap, metasploit, wireshark, aircrack-ng, hashcat, 
+john, and many others. You can query for more specific tools as needed.
+
+IMPORTANT SCANNING GUIDELINES:
+1. Always start with common ports (1-1024) or specific service ports
+2. Use -sS (stealth scan) by default for nmap
+3. Add -sV only after finding open ports
+4. Use -Pn if host is blocking ping
+5. For web services, focus on ports 80,443,8080
+6. Use appropriate timing templates (-T4 for most scans)
+
+Design your commands to work sequentially as a workflow, where later commands build on the results of earlier ones.
+For commands that need input from previous commands, use placeholders like <target_ip>.
 
 Provide the specific commands that would accomplish this task, explaining what each command does.
 """
