@@ -76,14 +76,31 @@ mkdir -p "$LOG_DIR"
 
 # Copy files
 echo "Copying files..."
-cp -r lib/* "$INSTALL_DIR/lib/" 2>/dev/null || mkdir -p "$INSTALL_DIR/lib"
-cp -r custom_commands/* "$INSTALL_DIR/custom_commands/" 2>/dev/null || echo "Note: No custom commands found, creating empty directory"
-cp paw.py "$INSTALL_DIR/"
-cp add_custom_tool.py "$INSTALL_DIR/"
+# Create lib directory if it doesn't exist
+mkdir -p "$INSTALL_DIR/lib"
+
+# Copy Python files to lib directory
 cp ascii_art.py "$INSTALL_DIR/lib/"
 cp tools_registry.py "$INSTALL_DIR/lib/"
 cp extensive_kali_tools.py "$INSTALL_DIR/lib/"
-cp paw-config "$INSTALL_DIR/paw_config.py" 2>/dev/null || echo "Note: paw-config script not found as a Python file, using bash script instead"
+
+# Copy other files
+cp -r custom_commands/* "$INSTALL_DIR/custom_commands/" 2>/dev/null || echo "Note: No custom commands found, creating empty directory"
+cp paw.py "$INSTALL_DIR/"
+cp add_custom_tool.py "$INSTALL_DIR/"
+
+# Handle paw-config
+if [ -f "paw-config" ]; then
+  if head -n 1 "paw-config" | grep -q "bash"; then
+    cp paw-config "$INSTALL_DIR/paw_config.sh"
+  else
+    cp paw-config "$INSTALL_DIR/paw_config.py"
+  fi
+else
+  echo "Note: paw-config script not found"
+fi
+
+# Copy documentation
 cp README.md "$DOC_DIR/"
 cp examples.md "$DOC_DIR/" 2>/dev/null || echo "Note: examples.md not found, skipping"
 
@@ -116,14 +133,31 @@ EOF
 chmod +x "$BIN_DIR/add-paw-tool"
 
 # Check if paw-config is a bash script or needs to be created
-if [ -f "paw-config" ] && head -n 1 "paw-config" | grep -q "bash"; then
-  cp paw-config "$BIN_DIR/paw-config"
+if [ -f "$INSTALL_DIR/paw_config.sh" ]; then
+  cat > "$BIN_DIR/paw-config" << 'EOF'
+#!/bin/bash
+export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
+/usr/local/share/paw/paw_config.sh "$@"
+EOF
   chmod +x "$BIN_DIR/paw-config"
-else
+elif [ -f "$INSTALL_DIR/paw_config.py" ]; then
   cat > "$BIN_DIR/paw-config" << 'EOF'
 #!/bin/bash
 export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
 python3 /usr/local/share/paw/paw_config.py "$@"
+EOF
+  chmod +x "$BIN_DIR/paw-config"
+else
+  echo "WARNING: paw-config script not found, creating default configuration script"
+  cat > "$BIN_DIR/paw-config" << 'EOF'
+#!/bin/bash
+echo "PAW configuration tool"
+echo "Usage: paw-config [option]"
+echo ""
+echo "Options:"
+echo "  --model <model_name>    Set the default model"
+echo "  --theme <theme_name>    Set the UI theme"
+echo "  --help                  Show this help message"
 EOF
   chmod +x "$BIN_DIR/paw-config"
 fi
