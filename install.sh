@@ -95,20 +95,23 @@ touch "$INSTALL_DIR/custom_commands/__init__.py"
 echo "Creating commands..."
 cat > "$BIN_DIR/PAW" << 'EOF'
 #!/bin/bash
-PYTHONPATH=/usr/local/share/paw/lib python3 /usr/local/share/paw/paw.py "$@"
+export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
+python3 /usr/local/share/paw/paw.py "$@"
 EOF
 chmod +x "$BIN_DIR/PAW"
 
 # Also create lowercase command for compatibility
 cat > "$BIN_DIR/paw" << 'EOF'
 #!/bin/bash
-PYTHONPATH=/usr/local/share/paw/lib python3 /usr/local/share/paw/paw.py "$@"
+export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
+python3 /usr/local/share/paw/paw.py "$@"
 EOF
 chmod +x "$BIN_DIR/paw"
 
 cat > "$BIN_DIR/add-paw-tool" << 'EOF'
 #!/bin/bash
-PYTHONPATH=/usr/local/share/paw/lib python3 /usr/local/share/paw/add_custom_tool.py "$@"
+export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
+python3 /usr/local/share/paw/add_custom_tool.py "$@"
 EOF
 chmod +x "$BIN_DIR/add-paw-tool"
 
@@ -119,10 +122,41 @@ if [ -f "paw-config" ] && head -n 1 "paw-config" | grep -q "bash"; then
 else
   cat > "$BIN_DIR/paw-config" << 'EOF'
 #!/bin/bash
-PYTHONPATH=/usr/local/share/paw/lib python3 /usr/local/share/paw/paw_config.py "$@"
+export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
+python3 /usr/local/share/paw/paw_config.py "$@"
 EOF
   chmod +x "$BIN_DIR/paw-config"
 fi
+
+# Create a Python environment file
+echo "Creating Python environment file..."
+cat > "$INSTALL_DIR/lib/paw_env.py" << 'EOF'
+import os
+import sys
+
+# Add the lib directory to Python path
+lib_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lib')
+if lib_dir not in sys.path:
+    sys.path.insert(0, lib_dir)
+EOF
+
+# Make sure the lib directory is in Python path
+echo "Setting up Python path..."
+cat > "$INSTALL_DIR/lib/__init__.py" << 'EOF'
+import os
+import sys
+
+# Add the lib directory to Python path
+lib_dir = os.path.dirname(os.path.abspath(__file__))
+if lib_dir not in sys.path:
+    sys.path.insert(0, lib_dir)
+
+# Import environment setup
+try:
+    from paw_env import *
+except ImportError:
+    pass
+EOF
 
 # Make custom command scripts executable
 chmod +x "$INSTALL_DIR/custom_commands"/*.py 2>/dev/null || echo "No custom commands to make executable"
@@ -212,20 +246,48 @@ if command -v ollama >/dev/null 2>&1; then
   if curl -s --connect-timeout 5 http://localhost:11434/api/tags >/dev/null 2>&1; then
     echo "Ollama service is running."
     
-    # Check if the configured model exists
+    # Get configured model
     MODEL=$(grep "^model" "$CONFIG_DIR/config.ini" | cut -d'=' -f2- | tr -d ' ')
     echo "Checking for model: $MODEL"
-    if curl -s http://localhost:11434/api/tags | grep -q "\"name\":\"$MODEL\""; then
+    
+    # Get list of available models
+    AVAILABLE_MODELS=$(curl -s http://localhost:11434/api/tags | grep -o '"name":"[^"]*"' | cut -d'"' -f4)
+    
+    if echo "$AVAILABLE_MODELS" | grep -q "^$MODEL$"; then
       echo "Configured model '$MODEL' is available."
     else
       echo "WARNING: Configured model '$MODEL' is not available in Ollama."
-      read -p "Would you like to pull this model now? (y/n): " pull_model
-      if [[ "$pull_model" =~ ^[Yy]$ ]]; then
-        echo "Pulling model $MODEL (this may take a while)..."
-        ollama pull "$MODEL"
+      
+      # Try to find first available model if Qwen is not available
+      FIRST_AVAILABLE_MODEL=$(echo "$AVAILABLE_MODELS" | head -n1)
+      
+      if [ -n "$FIRST_AVAILABLE_MODEL" ]; then
+        echo "Found available model: $FIRST_AVAILABLE_MODEL"
+        read -p "Would you like to use $FIRST_AVAILABLE_MODEL instead? (y/n): " use_available
+        if [[ "$use_available" =~ ^[Yy]$ ]]; then
+          # Update config with first available model
+          sed -i "s/^model = .*/model = $FIRST_AVAILABLE_MODEL/" "$CONFIG_DIR/config.ini"
+          echo "Updated configuration to use $FIRST_AVAILABLE_MODEL"
+        else
+          read -p "Would you like to pull the configured model ($MODEL) now? (y/n): " pull_model
+          if [[ "$pull_model" =~ ^[Yy]$ ]]; then
+            echo "Pulling model $MODEL (this may take a while)..."
+            ollama pull "$MODEL"
+          else
+            echo "You can pull the model later with: ollama pull $MODEL"
+            echo "Or change the model in /etc/paw/config.ini with: sudo paw-config"
+          fi
+        fi
       else
-        echo "You can pull the model later with: ollama pull $MODEL"
-        echo "Or change the model in /etc/paw/config.ini with: sudo paw-config"
+        echo "No models are currently available in Ollama."
+        read -p "Would you like to pull the configured model ($MODEL) now? (y/n): " pull_model
+        if [[ "$pull_model" =~ ^[Yy]$ ]]; then
+          echo "Pulling model $MODEL (this may take a while)..."
+          ollama pull "$MODEL"
+        else
+          echo "You can pull the model later with: ollama pull $MODEL"
+          echo "Or change the model in /etc/paw/config.ini with: sudo paw-config"
+        fi
       fi
     fi
   else
