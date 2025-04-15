@@ -16,6 +16,16 @@ import importlib.util
 import re
 import socket
 
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+    ]
+)
+logger = logging.getLogger('PAW')
+
 # Add rich library for fancy UI
 try:
     from rich.console import Console
@@ -38,111 +48,60 @@ sys.path.append('/usr/local/share/paw/lib')
 try:
     from ascii_art import display_ascii_art
     from tools_registry import get_tools_registry
-    from extensive_kali_tools import KALI_TOOLS, CATEGORIES
+    # Import functions instead of direct data
+    from extensive_kali_tools import (
+        get_all_kali_tools, 
+        get_tool_categories, 
+        get_tools_by_category,
+        get_tool_info as get_external_tool_info
+    )
 except ImportError:
     # For development/local environment
     from ascii_art import display_ascii_art
     from tools_registry import get_tools_registry
     try:
-        from extensive_kali_tools import KALI_TOOLS, CATEGORIES
+        from extensive_kali_tools import (
+            get_all_kali_tools, 
+            get_tool_categories, 
+            get_tools_by_category,
+            get_tool_info as get_external_tool_info
+        )
     except ImportError:
-        # Define fallback minimal tool data if extensive_kali_tools is not available
-        logger.warning("extensive_kali_tools module not found. Using basic tool information.")
+        # Fallback if extensive_kali_tools module not found
+        logger.warning("extensive_kali_tools module not found. Limited tool information will be available.")
         
-        # Basic set of common Kali tools
-        KALI_TOOLS = [
-            {
-                "name": "nmap",
-                "category": "Information Gathering",
-                "description": "Network exploration tool and port scanner",
-                "examples": [
-                    {"description": "Basic scan", "command": "nmap 192.168.1.1"},
-                    {"description": "Service scan", "command": "nmap -sV 192.168.1.1"},
-                    {"description": "Aggressive scan", "command": "nmap -A 192.168.1.1"}
-                ]
-            },
-            {
-                "name": "nikto",
-                "category": "Web Application Analysis",
-                "description": "Web server scanner which performs tests against web servers",
-                "examples": [
-                    {"description": "Basic scan", "command": "nikto -h http://192.168.1.1"}
-                ]
-            },
-            {
-                "name": "dirb",
-                "category": "Web Application Analysis",
-                "description": "Web content scanner that looks for existing web objects",
-                "examples": [
-                    {"description": "Basic scan", "command": "dirb http://192.168.1.1"}
-                ]
-            },
-            {
-                "name": "hydra",
-                "category": "Password Attacks",
-                "description": "Password cracking tool supporting numerous protocols",
-                "examples": [
-                    {"description": "SSH attack", "command": "hydra -l admin -P wordlist.txt ssh://192.168.1.1"}
-                ]
-            },
-            {
-                "name": "sqlmap",
-                "category": "Web Application Analysis",
-                "description": "Automatic SQL injection tool",
-                "examples": [
-                    {"description": "Basic scan", "command": "sqlmap -u \"http://192.168.1.1/page.php?id=1\""}
-                ]
-            },
-            {
-                "name": "wireshark",
-                "category": "Sniffing & Spoofing",
-                "description": "Network protocol analyzer",
-                "examples": [
-                    {"description": "Capture on interface", "command": "wireshark -i eth0"}
-                ]
-            },
-            {
-                "name": "metasploit",
-                "category": "Exploitation Tools",
-                "description": "Framework for developing, testing, and executing exploits",
-                "examples": [
-                    {"description": "Start console", "command": "msfconsole"}
-                ]
-            },
-            {
-                "name": "aircrack-ng",
-                "category": "Wireless Attacks",
-                "description": "Suite of tools for wireless network security assessments",
-                "examples": [
-                    {"description": "Check interface", "command": "airmon-ng"}
-                ]
-            }
-        ]
-        
-        CATEGORIES = [
-            "Information Gathering",
-            "Vulnerability Analysis",
-            "Web Application Analysis",
-            "Database Assessment",
-            "Password Attacks",
-            "Wireless Attacks",
-            "Reverse Engineering",
-            "Exploitation Tools",
-            "Sniffing & Spoofing",
-            "Post Exploitation",
-            "Forensics",
-            "Reporting Tools"
-        ]
-
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-    ]
-)
-logger = logging.getLogger('PAW')
+        # Define minimal fallback functions for when extensive_kali_tools is not available
+        def get_all_kali_tools():
+            """Fallback function to return a minimal set of common Kali tools."""
+            return [
+                # Basic set of the most common tools - minimized for readability
+                {"name": "nmap", "category": "Information Gathering", "description": "Network scanner"},
+                {"name": "nikto", "category": "Web Application Analysis", "description": "Web server scanner"},
+                {"name": "dirb", "category": "Web Application Analysis", "description": "Web content scanner"},
+                {"name": "hydra", "category": "Password Attacks", "description": "Password cracking tool"}
+            ]
+            
+        def get_tool_categories():
+            """Fallback function to return basic tool categories."""
+            return [
+                "Information Gathering",
+                "Vulnerability Analysis",
+                "Web Application Analysis",
+                "Password Attacks"
+            ]
+            
+        def get_tools_by_category(category):
+            """Fallback function to return tools in a specific category."""
+            tools = get_all_kali_tools()
+            return [tool for tool in tools if tool["category"] == category]
+            
+        def get_external_tool_info(tool_name):
+            """Fallback function to return information about a specific tool."""
+            tools = get_all_kali_tools()
+            for tool in tools:
+                if tool["name"].lower() == tool_name.lower():
+                    return tool
+            return None
 
 # Configuration
 CONFIG_PATH = "/etc/paw/config.ini"
@@ -263,6 +222,10 @@ class PAW:
         
         # Cache for tool information
         self.tool_info_cache = {}
+        
+        # Initialize our tool database by calling the external module
+        self.all_kali_tools = get_all_kali_tools()
+        self.tool_categories = get_tool_categories()
     
     def get_relevant_tools_for_request(self, request):
         """Dynamically extract relevant tool information based on the user request"""
@@ -311,7 +274,7 @@ class PAW:
             
         # Select tools from matching categories
         tools_added = set()
-        for tool in KALI_TOOLS:
+        for tool in self.all_kali_tools:
             # Always include important tools
             if tool["name"] in important_tools and tool["name"] not in tools_added:
                 relevant_tools.append(tool)
@@ -456,24 +419,26 @@ class PAW:
         
     def get_tool_info(self, tool_name):
         """Get detailed information about a specific tool."""
-        for tool in KALI_TOOLS:
-            if tool["name"].lower() == tool_name.lower():
-                tool_info = f"TOOL: {tool['name']} ({tool['category']})\n"
-                tool_info += f"DESCRIPTION: {tool['description']}\n"
+        # First, try to get tool info from the external module
+        tool = get_external_tool_info(tool_name)
+        
+        if tool:
+            tool_info = f"TOOL: {tool['name']} ({tool['category']})\n"
+            tool_info += f"DESCRIPTION: {tool['description']}\n"
+            
+            if "common_usage" in tool:
+                tool_info += f"USAGE: {tool['common_usage']}\n"
                 
-                if "common_usage" in tool:
-                    tool_info += f"USAGE: {tool['common_usage']}\n"
+            if "examples" in tool and tool["examples"]:
+                tool_info += "EXAMPLES:\n"
+                for example in tool["examples"][:5]:  # Limit to 5 examples
+                    tool_info += f"- {example['description']}: {example['command']}\n"
                     
-                if "examples" in tool and tool["examples"]:
-                    tool_info += "EXAMPLES:\n"
-                    for example in tool["examples"][:5]:  # Limit to 5 examples
-                        tool_info += f"- {example['description']}: {example['command']}\n"
-                        
-                return tool_info
-                
-        # If tool not found
+            return tool_info
+            
+        # If tool not found, find similar tools
         similar_tools = []
-        for tool in KALI_TOOLS:
+        for tool in self.all_kali_tools:
             if tool_name in tool["name"].lower() or tool["name"].lower() in tool_name:
                 similar_tools.append(tool["name"])
                 
@@ -485,39 +450,40 @@ class PAW:
     def get_category_info(self, category_name):
         """Get information about tools in a specific category."""
         category_info = ""
-        category_tools = []
         
         # Try to find exact category match
-        for category in CATEGORIES:
+        category_match = None
+        for category in self.tool_categories:
             if category.lower() == category_name.lower():
-                category_name = category  # Use proper case
+                category_match = category
                 break
                 
-        # Find tools in this category
-        for tool in KALI_TOOLS:
-            if tool["category"].lower() == category_name.lower():
-                category_tools.append(tool)
-                
-        if category_tools:
-            category_info = f"CATEGORY: {category_name}\n"
-            category_info += f"Available Tools ({len(category_tools)}):\n"
+        if category_match:
+            # Get tools in this category using the external module
+            category_tools = get_tools_by_category(category_match)
             
-            for tool in category_tools[:10]:  # Limit to 10 tools per category
-                category_info += f"- {tool['name']}: {tool['description']}\n"
+            if category_tools:
+                category_info = f"CATEGORY: {category_match}\n"
+                category_info += f"Available Tools ({len(category_tools)}):\n"
                 
-            if len(category_tools) > 10:
-                category_info += f"... and {len(category_tools) - 10} more tools\n"
+                for tool in category_tools[:10]:  # Limit to 10 tools per category
+                    category_info += f"- {tool['name']}: {tool['description']}\n"
+                    
+                if len(category_tools) > 10:
+                    category_info += f"... and {len(category_tools) - 10} more tools\n"
+            else:
+                category_info = f"No tools found in category '{category_match}'."
         else:
             # If category not found, suggest similar categories
             similar_categories = []
-            for category in CATEGORIES:
+            for category in self.tool_categories:
                 if category_name.lower() in category.lower():
                     similar_categories.append(category)
                     
             if similar_categories:
                 category_info = f"Category '{category_name}' not found. Did you mean: {', '.join(similar_categories)}?"
             else:
-                category_info = f"Category '{category_name}' not found. Available categories: {', '.join(CATEGORIES[:5])}..."
+                category_info = f"Category '{category_name}' not found. Available categories: {', '.join(self.tool_categories[:5])}..."
                 
         return category_info
     
