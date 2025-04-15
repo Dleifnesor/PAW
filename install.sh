@@ -95,20 +95,20 @@ touch "$INSTALL_DIR/custom_commands/__init__.py"
 echo "Creating commands..."
 cat > "$BIN_DIR/PAW" << 'EOF'
 #!/bin/bash
-python3 /usr/local/share/paw/paw.py "$@"
+PYTHONPATH=/usr/local/share/paw/lib python3 /usr/local/share/paw/paw.py "$@"
 EOF
 chmod +x "$BIN_DIR/PAW"
 
 # Also create lowercase command for compatibility
 cat > "$BIN_DIR/paw" << 'EOF'
 #!/bin/bash
-python3 /usr/local/share/paw/paw.py "$@"
+PYTHONPATH=/usr/local/share/paw/lib python3 /usr/local/share/paw/paw.py "$@"
 EOF
 chmod +x "$BIN_DIR/paw"
 
 cat > "$BIN_DIR/add-paw-tool" << 'EOF'
 #!/bin/bash
-python3 /usr/local/share/paw/add_custom_tool.py "$@"
+PYTHONPATH=/usr/local/share/paw/lib python3 /usr/local/share/paw/add_custom_tool.py "$@"
 EOF
 chmod +x "$BIN_DIR/add-paw-tool"
 
@@ -119,7 +119,7 @@ if [ -f "paw-config" ] && head -n 1 "paw-config" | grep -q "bash"; then
 else
   cat > "$BIN_DIR/paw-config" << 'EOF'
 #!/bin/bash
-python3 /usr/local/share/paw/paw_config.py "$@"
+PYTHONPATH=/usr/local/share/paw/lib python3 /usr/local/share/paw/paw_config.py "$@"
 EOF
   chmod +x "$BIN_DIR/paw-config"
 fi
