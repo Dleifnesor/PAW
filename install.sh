@@ -80,11 +80,15 @@ cp -r lib/* "$INSTALL_DIR/lib/" 2>/dev/null || mkdir -p "$INSTALL_DIR/lib"
 cp -r custom_commands/* "$INSTALL_DIR/custom_commands/" 2>/dev/null || echo "Note: No custom commands found, creating empty directory"
 cp paw.py "$INSTALL_DIR/"
 cp add_custom_tool.py "$INSTALL_DIR/"
+cp extensive_kali_tools.py "$INSTALL_DIR/" 2>/dev/null || echo "Note: extensive_kali_tools.py not found, Kali tools functionality may be limited"
+cp add_kali_tools.py "$INSTALL_DIR/" 2>/dev/null || echo "Note: add_kali_tools.py not found, skipping"
+cp add_tools_example.py "$INSTALL_DIR/" 2>/dev/null || echo "Note: add_tools_example.py not found, skipping"
 cp ascii_art.py "$INSTALL_DIR/lib/"
 cp tools_registry.py "$INSTALL_DIR/lib/"
 cp paw-config "$INSTALL_DIR/paw_config.py" 2>/dev/null || echo "Note: paw-config script not found as a Python file, using bash script instead"
 cp README.md "$DOC_DIR/"
 cp examples.md "$DOC_DIR/" 2>/dev/null || echo "Note: examples.md not found, skipping"
+cp README_KALI_TOOLS.md "$DOC_DIR/" 2>/dev/null || echo "Note: README_KALI_TOOLS.md not found, skipping"
 
 # Create __init__.py files for proper importing
 touch "$INSTALL_DIR/lib/__init__.py"
@@ -110,6 +114,12 @@ cat > "$BIN_DIR/add-paw-tool" << 'EOF'
 python3 /usr/local/share/paw/add_custom_tool.py "$@"
 EOF
 chmod +x "$BIN_DIR/add-paw-tool"
+
+cat > "$BIN_DIR/paw-kali-tools" << 'EOF'
+#!/bin/bash
+python3 /usr/local/share/paw/extensive_kali_tools.py "$@"
+EOF
+chmod +x "$BIN_DIR/paw-kali-tools"
 
 # Check if paw-config is a bash script or needs to be created
 if [ -f "paw-config" ] && head -n 1 "paw-config" | grep -q "bash"; then
@@ -153,13 +163,22 @@ chmod 644 "$CONFIG_DIR/config.ini"
 chmod -R 777 "$LOG_DIR"  # Allow all users to write logs
 chmod -R 755 "$DOC_DIR"
 
+# Run extensive_kali_tools.py to populate the tool registry
+if [ -f "$INSTALL_DIR/extensive_kali_tools.py" ]; then
+  echo "Populating Kali Linux tools registry..."
+  python3 "$INSTALL_DIR/extensive_kali_tools.py" || echo "Warning: Failed to populate Kali tools registry. You can run 'paw-kali-tools' manually after installation."
+else
+  echo "Note: extensive_kali_tools.py not found. Kali tools functionality will be limited."
+  echo "You can manually add Kali tools later using 'paw-kali-tools' if you install the file."
+fi
+
 # Verifying installation...
 echo "Verifying installation..."
 
 # Check commands
 echo -n "Checking command availability: "
 COMMANDS_OK=true
-for cmd in "PAW" "paw" "add-paw-tool" "paw-config"; do
+for cmd in "PAW" "paw" "add-paw-tool" "paw-config" "paw-kali-tools"; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "WARNING: $cmd command is not in path."
     COMMANDS_OK=false

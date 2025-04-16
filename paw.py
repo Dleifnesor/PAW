@@ -632,6 +632,36 @@ class PAW:
                 print(f"\n  \033[1;33m[{i}] Command:\033[0m {cmd}")
                 print(f"      \033[1;32mExplanation:\033[0m {explanation}")
     
+    def display_single_command(self, command, explanation, command_index, total_commands):
+        """Display a single command with its explanation and ask for y/n confirmation."""
+        if RICH_AVAILABLE:
+            table = Table(
+                show_header=True,
+                header_style=f"bold {self.theme['primary']}", 
+                border_style=self.theme['border_style'],
+                padding=(0, 1)
+            )
+            table.add_column("Command", style="bold yellow")
+            table.add_column("Explanation")
+            
+            table.add_row(Syntax(command, "bash", theme=self.theme['code_theme']), explanation)
+            
+            console.print(Panel(
+                table,
+                title=f"[bold]Command {command_index}/{total_commands}[/]",
+                border_style=self.theme['border_style'],
+                padding=(1, 1)
+            ))
+            
+            run_cmd = Prompt.ask("Execute this command?", choices=["y", "n"], default="y")
+            return run_cmd == "y"
+        else:
+            print(f"\n  \033[1;33m[{command_index}/{total_commands}] Command:\033[0m {command}")
+            print(f"      \033[1;32mExplanation:\033[0m {explanation}")
+            
+            run_cmd = input("\033[1;35m[?] Execute this command? [y/n] (y): \033[0m").strip().lower()
+            return run_cmd == "" or run_cmd == "y"
+    
     def display_result(self, result, command_index, total_commands):
         """Display command execution result with fancy formatting."""
         if RICH_AVAILABLE:
@@ -739,88 +769,19 @@ The command should directly use the values from the previous output when appropr
         return next_command, explanation
     
     def interactive_command_selection(self, commands, explanations):
-        """Allow user to selectively run or edit commands."""
+        """Allow user to selectively run commands one by one with y/n confirmation."""
         selected_commands = []
         
-        if RICH_AVAILABLE:
-            console.print("\n[bold cyan]Would you like to run these commands?[/]")
-            
-            options = [
-                "Run all commands",
-                "Select commands to run",
-                "Edit commands before running", 
-                "Run commands one at a time (progressive mode)",
-                "Cancel execution"
-            ]
-            
-            # Default to progressive mode (option 4) if already in adaptive/progressive mode
-            default_choice = "4" if self.adaptive_mode else "1"
-            
-            choice = Prompt.ask(
-                "Choose an option",
-                choices=["1", "2", "3", "4", "5"],
-                default=default_choice
-            )
-            
-            if choice == "1":
-                self.adaptive_mode = False
-                return commands, self.adaptive_mode  # Run all commands
-            elif choice == "2":
-                # Select which commands to run
-                self.adaptive_mode = False
-                for i, (cmd, explanation) in enumerate(zip(commands, explanations), 1):
-                    console.print(f"\n[bold]{i}.[/] {cmd}")
-                    console.print(f"   [dim]{explanation}[/]")
-                    run_cmd = Confirm.ask(f"Run this command?", default=True)
-                    if run_cmd:
-                        selected_commands.append(cmd)
-                return selected_commands, self.adaptive_mode
-            elif choice == "3":
-                # Edit commands before running
-                self.adaptive_mode = False
-                for i, (cmd, explanation) in enumerate(zip(commands, explanations), 1):
-                    console.print(f"\n[bold]{i}.[/] [yellow]{cmd}[/]")
-                    console.print(f"   [dim]{explanation}[/]")
-                    edit = Confirm.ask(f"Edit this command?", default=False)
-                    if edit:
-                        edited_cmd = Prompt.ask("Enter edited command", default=cmd)
-                        selected_commands.append(edited_cmd)
-                    else:
-                        selected_commands.append(cmd)
-                return selected_commands, self.adaptive_mode
-            elif choice == "4":
-                # Run progressively, one at a time
-                self.adaptive_mode = True
-                # Only return the first command
-                if commands:
-                    return [commands[0]], self.adaptive_mode
-                return [], self.adaptive_mode
-            else:
-                return [], False  # Cancel execution
-        else:
-            console.print("\n[*] Options:")
-            console.print("  1. Run all commands")
-            console.print("  2. Run commands one at a time (progressive mode)")
-            console.print("  3. Cancel execution")
-            
-            # Default to progressive mode if already in adaptive/progressive mode
-            default_choice = "2" if self.adaptive_mode else "1"
-            choice_prompt = f"\033[1;35m[?] Choose an option (1/2/3) [{default_choice}]: \033[0m"
-            
-            choice_input = input(choice_prompt).strip()
-            choice = choice_input if choice_input else default_choice
-            
-            if choice == "1":
-                self.adaptive_mode = False
-                return commands, self.adaptive_mode  # Run all commands
-            elif choice == "2":
-                self.adaptive_mode = True
-                # Only return the first command
-                if commands:
-                    return [commands[0]], self.adaptive_mode
-                return [], self.adaptive_mode
-            else:
-                return [], False  # Cancel execution
+        # Always use progressive mode with one-by-one execution
+        self.adaptive_mode = True
+        
+        # Only return the first command if approved
+        if commands and explanations:
+            if self.display_single_command(commands[0], explanations[0], 1, len(commands)):
+                return [commands[0]], self.adaptive_mode
+        
+        # If user doesn't approve the first command or there are no commands
+        return [], self.adaptive_mode
     
     def retry_failed_command(self, result, variables):
         """Handle failed command with retry options."""
@@ -839,51 +800,21 @@ The command should directly use the values from the previous output when appropr
             if fixed_command != result['command']:
                 console.print(f"[bold green]Suggested fix:[/] {fixed_command}")
                 
-                options = [
-                    "Use suggested fix",
-                    "Edit command manually",
-                    "Skip this command",
-                    "Abort execution"
-                ]
-                
-                choice = Prompt.ask(
-                    "How would you like to proceed?",
-                    choices=["1", "2", "3", "4"],
-                    default="1"
-                )
-                
-                if choice == "1":
+                run_fixed = Prompt.ask("Execute this fixed command?", choices=["y", "n"], default="y")
+                if run_fixed == "y":
                     return self.execute_command(fixed_command, updated_vars), True
-                elif choice == "2":
-                    manual_cmd = Prompt.ask("Enter fixed command", default=fixed_command)
-                    return self.execute_command(manual_cmd, updated_vars), True
-                elif choice == "3":
-                    return result, False  # Skip but continue workflow
                 else:
-                    return result, None  # Abort entirely
+                    return result, False
             else:
-                # Couldn't auto-fix, ask user
-                options = [
-                    "Edit command manually",
-                    "Skip this command",
-                    "Abort execution"
-                ]
+                # No automated fix available
+                console.print("[bold yellow]No automated fix available for this error.[/]")
+                skip_cmd = Prompt.ask("Skip this command?", choices=["y", "n"], default="n")
                 
-                choice = Prompt.ask(
-                    "How would you like to proceed?",
-                    choices=["1", "2", "3"],
-                    default="1"
-                )
-                
-                if choice == "1":
-                    manual_cmd = Prompt.ask("Enter fixed command", default=result['command'])
-                    return self.execute_command(manual_cmd, variables), True
-                elif choice == "2":
+                if skip_cmd == "y":
                     return result, False
                 else:
-                    return result, None
+                    return result, None  # Abort execution
         else:
-            # Basic terminal UI version
             print(f"\033[1;31m[!] Command failed: {result['command']}\033[0m")
             print(f"\033[1;31m[!] Error: {result['stderr']}\033[0m")
             
@@ -895,33 +826,29 @@ The command should directly use the values from the previous output when appropr
             if fixed_command != result['command']:
                 print(f"\033[1;32m[+] Suggested fix: {fixed_command}\033[0m")
                 
-                choice = input("\033[1;35m[?] Use suggested fix (y), edit manually (e), skip (s), or abort (a)? \033[0m").lower()
-                
-                if choice == 'y':
+                run_fixed = input("\033[1;35m[?] Execute this fixed command? [y/n] (y): \033[0m").strip().lower()
+                if run_fixed == "" or run_fixed == "y":
                     return self.execute_command(fixed_command, updated_vars), True
-                elif choice == 'e':
-                    manual_cmd = input(f"\033[1;35m[?] Enter fixed command: \033[0m")
-                    return self.execute_command(manual_cmd, updated_vars), True
-                elif choice == 's':
-                    return result, False
                 else:
-                    return result, None
+                    return result, False
             else:
-                choice = input("\033[1;35m[?] Edit manually (e), skip (s), or abort (a)? \033[0m").lower()
+                # No automated fix available
+                print("\033[1;33m[!] No automated fix available for this error.\033[0m")
+                skip_cmd = input("\033[1;35m[?] Skip this command? [y/n] (n): \033[0m").strip().lower()
                 
-                if choice == 'e':
-                    manual_cmd = input(f"\033[1;35m[?] Enter fixed command: \033[0m")
-                    return self.execute_command(manual_cmd, variables), True
-                elif choice == 's':
+                if skip_cmd == "y":
                     return result, False
                 else:
-                    return result, None
+                    return result, None  # Abort execution
     
     def process_request(self, request, adaptive_override=None):
         """Process a natural language request."""
         # Override adaptive mode if specified
         if adaptive_override is not None:
             self.adaptive_mode = adaptive_override
+        else:
+            # Always use adaptive mode for the new one-by-one execution flow
+            self.adaptive_mode = True
             
         # Clean up the request
         request = request.replace('\r', '').strip()
@@ -1013,190 +940,99 @@ Provide the specific commands that would accomplish this task, explaining what e
                 print("\033[1;33m[!] No commands were generated for this request.\033[0m")
             return
         
-        # Display proposed commands
-        if EXPLAIN_COMMANDS:
-            self.display_commands(commands, explanations)
-            
-            # Display mode indicator before command selection
-            if self.adaptive_mode:
-                if RICH_AVAILABLE:
-                    console.print(Panel(
-                        "[bold cyan]PROGRESSIVE MODE ACTIVE[/] - Commands will be executed one at a time",
-                        border_style=self.theme['border_style'],
-                        padding=(1, 2)
-                    ))
-                else:
-                    print("\n\033[1;36m[*] PROGRESSIVE MODE ACTIVE - Commands will be executed one at a time\033[0m")
-            
-            # Interactive command selection
-            commands, adaptive_mode = self.interactive_command_selection(commands, explanations)
-            
-            if not commands:
-                if RICH_AVAILABLE:
-                    console.print("[bold red]Execution cancelled[/]")
-                else:
-                    print("\n\033[1;31m[!] Execution cancelled\033[0m")
-                return
-        
-        # Execute commands
-        results = []
+        # Execute commands one by one
         variables = {}  # Store variables for command chaining
-        
-        if RICH_AVAILABLE:
-            mode_str = "[bold cyan]Progressive Mode[/]" if self.adaptive_mode else "[bold]Sequential Mode[/]"
-            mode_description = "Commands will be executed ONE AT A TIME" if self.adaptive_mode else "All commands will run in sequence"
-            console.print(Panel(
-                f"[bold]Executing Commands[/] in {mode_str}\n{mode_description}", 
-                border_style=self.theme['border_style']
-            ))
-        else:
-            mode_str = "Progressive Mode" if self.adaptive_mode else "Sequential Mode"
-            mode_description = "Commands will be executed ONE AT A TIME" if self.adaptive_mode else "All commands will run in sequence"
-            print(f"\n\033[1;34m[*] Executing commands in {mode_str}:\033[0m")
-            print(f"\033[1;34m[*] {mode_description}\033[0m")
-        
         command_index = 0
-        while command_index < len(commands):
+        total_commands = len(commands)
+        
+        while command_index < total_commands:
             cmd = commands[command_index]
-            command_index += 1  # Increment for next command
+            explanation = explanations[command_index] if command_index < len(explanations) else ""
             
-            if RICH_AVAILABLE:
-                if self.adaptive_mode:
-                    console.print(Panel(f"[bold yellow]Command {command_index}:[/] {cmd}", 
-                                       title="[bold cyan]Current Command[/]",
-                                       border_style=self.theme['border_style']))
-                else:
-                    console.print(f"[bold yellow]Command {command_index}/{len(commands)}:[/] {cmd}")
-            else:
-                if self.adaptive_mode:
-                    print(f"\n\033[1;33m[{command_index}] Executing:\033[0m {cmd}")
-                else:
-                    print(f"\n\033[1;33m[{command_index}/{len(commands)}] Executing:\033[0m {cmd}")
-            
-            # Execute with current variables from previous commands
-            result = self.execute_command(cmd, variables)
-            
-            # Update variables with new ones from this command
-            variables = result["variables"]
-            
-            # Handle command failures with retry
-            if result["exit_code"] != 0:
-                retry_result, should_continue = self.retry_failed_command(result, variables)
+            # Display the command and ask for confirmation
+            if self.display_single_command(cmd, explanation, command_index + 1, total_commands):
+                # Execute with current variables from previous commands
+                result = self.execute_command(cmd, variables)
                 
-                if should_continue is None:  # User chose to abort
+                # Update variables with new ones from this command
+                variables = result["variables"]
+                
+                # Display result
+                self.display_result(result, command_index + 1, total_commands)
+                
+                # Handle command failures with retry
+                if result["exit_code"] != 0:
+                    retry_result, should_continue = self.retry_failed_command(result, variables)
+                    
+                    if should_continue is None:  # User chose to abort
+                        if RICH_AVAILABLE:
+                            console.print("[bold red]Execution aborted by user[/]")
+                        else:
+                            print("\n\033[1;31m[!] Execution aborted by user\033[0m")
+                        return
+                    
+                    if should_continue:  # User chose to retry with fix
+                        # Replace the failed result with retry result
+                        result = retry_result
+                        # Update variables with any new ones from retry
+                        variables = result["variables"]
+                
+                # In adaptive mode, generate the next command based on the current result if this is the last known command
+                if command_index == total_commands - 1 and result["exit_code"] == 0:
+                    # Format previous output for prompt
+                    prev_output = f"STDOUT:\n{result['stdout']}\n\nSTDERR:\n{result['stderr']}"
+                    
+                    # Ask if user wants to continue
                     if RICH_AVAILABLE:
-                        console.print("[bold red]Execution aborted by user[/]")
+                        console.print("\n[bold cyan]Command completed successfully[/]")
+                        continue_workflow = Confirm.ask("Generate next command based on this output?", default=True)
                     else:
-                        print("\n\033[1;31m[!] Execution aborted by user\033[0m")
-                    return
-                
-                if should_continue:  # User chose to retry with fix
-                    # Replace the failed result with retry result
-                    result = retry_result
-                    # Update variables with any new ones from retry
-                    variables = result["variables"]
-            
-            # Store the result for summary
-            results.append(result)
-            
-            # Display result
-            self.display_result(result, command_index, len(commands) if not self.adaptive_mode else "?")
-            
-            # In adaptive mode, generate the next command based on the current result
-            if self.adaptive_mode and result["exit_code"] == 0:
-                # Format previous output for prompt
-                prev_output = f"STDOUT:\n{result['stdout']}\n\nSTDERR:\n{result['stderr']}"
-                
-                # Ask if user wants to continue
-                if RICH_AVAILABLE:
-                    console.print("\n[bold cyan]Command completed successfully[/]")
-                    continue_workflow = Confirm.ask("Generate next command based on this output?", default=True)
-                else:
-                    print("\n\033[1;36m[*] Command completed successfully\033[0m")
-                    continue_workflow = input("\n\033[1;35m[?] Generate next command based on this output? (y/n): \033[0m").lower() == 'y'
-                
-                if continue_workflow:
-                    if RICH_AVAILABLE:
-                        with Progress(
-                            SpinnerColumn(),
-                            TextColumn("[bold cyan]Generating next command...[/]"),
-                            console=console,
-                            transient=True
-                        ) as progress:
-                            task = progress.add_task("Thinking...", total=None)
+                        print("\n\033[1;36m[*] Command completed successfully\033[0m")
+                        continue_workflow = input("\n\033[1;35m[?] Generate next command based on this output? (y/n): \033[0m").lower() == 'y'
+                    
+                    if continue_workflow:
+                        if RICH_AVAILABLE:
+                            with Progress(
+                                SpinnerColumn(),
+                                TextColumn("[bold cyan]Generating next command...[/]"),
+                                console=console,
+                                transient=True
+                            ) as progress:
+                                task = progress.add_task("Thinking...", total=None)
+                                next_cmd, next_explanation = self.generate_next_command(
+                                    request, result["command"], prev_output, variables
+                                )
+                        else:
+                            print("\n\033[1;34m[*] Generating next command...\033[0m")
                             next_cmd, next_explanation = self.generate_next_command(
                                 request, result["command"], prev_output, variables
                             )
-                    else:
-                        print("\n\033[1;34m[*] Generating next command...\033[0m")
-                        next_cmd, next_explanation = self.generate_next_command(
-                            request, result["command"], prev_output, variables
-                        )
-                    
-                    if next_cmd:
-                        # Display the suggested next command
-                        if RICH_AVAILABLE:
-                            console.print(Panel(
-                                f"[bold]Suggested next command:[/]\n{next_cmd}\n\n[bold]Explanation:[/]\n{next_explanation}",
-                                title="[bold cyan]Next Command[/]",
-                                border_style=self.theme['border_style']
-                            ))
-                            
-                            # Ask user if they want to use this command, edit it, or finish
-                            options = [
-                                "Use this command",
-                                "Edit this command",
-                                "End workflow"
-                            ]
-                            
-                            next_choice = Prompt.ask(
-                                "How would you like to proceed?",
-                                choices=["1", "2", "3"],
-                                default="1"
-                            )
-                            
-                            if next_choice == "1":
-                                # Add the command to our execution list
-                                commands.append(next_cmd)
-                                explanations.append(next_explanation)
-                            elif next_choice == "2":
-                                # Let user edit the command
-                                edited_cmd = Prompt.ask("Enter edited command", default=next_cmd)
-                                commands.append(edited_cmd)
-                                explanations.append(next_explanation)
-                            else:
-                                # End the workflow
-                                break
+                        
+                        if next_cmd:
+                            # Add the command to our list and continue loop
+                            commands.append(next_cmd)
+                            explanations.append(next_explanation)
+                            total_commands = len(commands)
+                            # Do not increment command_index yet - we'll show this command for approval first
                         else:
-                            print(f"\n\033[1;36m[*] Suggested next command:\033[0m {next_cmd}")
-                            print(f"\033[1;32m[*] Explanation:\033[0m {next_explanation}")
-                            
-                            next_choice = input("\n\033[1;35m[?] Use this command (u), edit it (e), or end workflow (q)? \033[0m").lower()
-                            
-                            if next_choice == 'u':
-                                # Add the command to our execution list
-                                commands.append(next_cmd)
-                                explanations.append(next_explanation)
-                            elif next_choice == 'e':
-                                # Let user edit the command
-                                edited_cmd = input(f"\n\033[1;35m[?] Enter edited command: \033[0m")
-                                commands.append(edited_cmd)
-                                explanations.append(next_explanation)
+                            # No next command could be generated
+                            if RICH_AVAILABLE:
+                                console.print("[bold yellow]Could not generate a next command. Workflow complete.[/]")
                             else:
-                                # End the workflow
-                                break
+                                print("\033[1;33m[!] Could not generate a next command. Workflow complete.\033[0m")
+                            break
                     else:
-                        if RICH_AVAILABLE:
-                            console.print("[bold yellow]Could not generate a next command.[/]")
-                            if Confirm.ask("End workflow?", default=True):
-                                break
-                        else:
-                            print("\033[1;33m[!] Could not generate a next command.\033[0m")
-                            if input("\n\033[1;35m[?] End workflow? (y/n): \033[0m").lower() == 'y':
-                                break
+                        # User chose not to continue
+                        break
+            else:
+                # User skipped this command, move to the next one
+                if RICH_AVAILABLE:
+                    console.print("[yellow]Command skipped[/]")
                 else:
-                    # User chose not to continue
-                    break
+                    print("\033[1;33m[*] Command skipped\033[0m")
+            
+            # Move to the next command
+            command_index += 1
         
         # Final summary
         if RICH_AVAILABLE:
@@ -1204,36 +1040,6 @@ Provide the specific commands that would accomplish this task, explaining what e
                                border_style=self.theme['success']))
         else:
             print("\n\033[1;32m[+] Workflow completed\033[0m")
-        
-        # Generate summary if there are multiple commands
-        if len(results) > 1:
-            summary_prompt = f"""
-Request: {request}
-
-Commands executed:
-{chr(10).join([r["command"] for r in results])}
-
-Results overview:
-{chr(10).join([f"Command {i+1}: Exit code {r['exit_code']}" for i, r in enumerate(results)])}
-
-Please provide a brief summary of the results and what was accomplished.
-"""
-            summary = self.generate_llm_response(summary_prompt)
-            
-            if RICH_AVAILABLE:
-                console.print(Panel(
-                    "\n".join([f"• {point}" for point in summary.get("plan", [])]),
-                    title="[bold]Summary[/]",
-                    border_style=self.theme['border_style'],
-                    padding=(1, 2)
-                ))
-            else:
-                print("\n\033[1;34m[*] Summary:\033[0m")
-                if "error" in summary:
-                    print(f"  Error generating summary: {summary['error']}")
-                else:
-                    for point in summary.get("plan", []):
-                        print(f"  - {point}")
 
 def main():
     parser = argparse.ArgumentParser(description="PAW - Prompt Assisted Workflow for Kali Linux")
