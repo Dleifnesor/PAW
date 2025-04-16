@@ -43,22 +43,20 @@ except ImportError:
     RICH_AVAILABLE = False
 
 # Add the PAW lib directory to the Python path
-sys.path.append('/usr/local/share/paw/lib')
+script_dir = os.path.dirname(os.path.realpath(__file__))
+if os.path.exists(os.path.join(script_dir, 'tools_registry.py')):
+    # For local development - use current directory
+    sys.path.append(script_dir)
+else:
+    # For system installations - use installed lib directory
+    sys.path.append('/usr/local/share/paw/lib')
+    # Also add the script directory itself
+    sys.path.append(script_dir)
 
 try:
     from ascii_art import display_ascii_art
     from tools_registry import get_tools_registry
     # Import functions instead of direct data
-    from extensive_kali_tools import (
-        get_all_kali_tools, 
-        get_tool_categories, 
-        get_tools_by_category,
-        get_tool_info as get_external_tool_info
-    )
-except ImportError:
-    # For development/local environment
-    from ascii_art import display_ascii_art
-    from tools_registry import get_tools_registry
     try:
         from extensive_kali_tools import (
             get_all_kali_tools, 
@@ -67,7 +65,6 @@ except ImportError:
             get_tool_info as get_external_tool_info
         )
     except ImportError:
-        # Fallback if extensive_kali_tools module not found
         logger.warning("extensive_kali_tools module not found. Limited tool information will be available.")
         
         # Define minimal fallback functions for when extensive_kali_tools is not available
@@ -102,6 +99,11 @@ except ImportError:
                 if tool["name"].lower() == tool_name.lower():
                     return tool
             return None
+except ImportError as e:
+    print(f"Error: Could not import PAW modules: {e}")
+    print("Make sure PAW is installed correctly and this script is in the correct directory.")
+    print("You can install PAW by running: bash install.sh")
+    sys.exit(1)
 
 # Configuration
 CONFIG_PATH = "/etc/paw/config.ini"
