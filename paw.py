@@ -49,12 +49,13 @@ if os.path.exists(os.path.join(script_dir, 'tools_registry.py')):
     sys.path.append(script_dir)
 else:
     # For system installations - use installed lib directory
-    sys.path.append('/usr/local/share/paw/lib')
+    sys.path.append('/usr/local/share/paw')
+    sys.path.append('/usr/local/share/paw/tools')
     # Also add the script directory itself
     sys.path.append(script_dir)
 
 try:
-    from ascii_art import display_ascii_art
+    import tools_registry
     from tools_registry import get_tools_registry
     # Import functions instead of direct data
     try:
