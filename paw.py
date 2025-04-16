@@ -44,19 +44,50 @@ except ImportError:
 
 # Add the PAW lib directory to the Python path
 script_dir = os.path.dirname(os.path.realpath(__file__))
-if os.path.exists(os.path.join(script_dir, 'tools_registry.py')):
-    # For local development - use current directory
-    sys.path.append(script_dir)
-else:
-    # For system installations - use installed lib directory
-    sys.path.append('/usr/local/share/paw')
-    sys.path.append('/usr/local/share/paw/tools')
-    # Also add the script directory itself
-    sys.path.append(script_dir)
+lib_dir = os.path.join(script_dir, 'lib')
+
+# For local development - use current directory and lib subdirectory
+sys.path.append(script_dir)
+if os.path.exists(lib_dir):
+    sys.path.append(lib_dir)
+
+# For system installations - use installed lib directory
+system_lib_dir = '/usr/local/share/paw/lib'
+if os.path.exists(system_lib_dir):
+    sys.path.append(system_lib_dir)
+sys.path.append('/usr/local/share/paw')
+sys.path.append('/usr/local/share/paw/tools')
+
+# Print path for debugging
+logger.debug(f"Python path: {sys.path}")
 
 try:
-    import tools_registry
+    # Try different possible import paths
+    try:
+        # Try to import from lib directory
+        if os.path.exists(os.path.join(lib_dir, 'tools_registry.py')):
+            sys.path.insert(0, lib_dir)
+            import tools_registry
+        elif os.path.exists(os.path.join(system_lib_dir, 'tools_registry.py')):
+            sys.path.insert(0, system_lib_dir)
+            import tools_registry
+        elif os.path.exists(os.path.join(script_dir, 'tools_registry.py')):
+            import tools_registry
+        else:
+            # Last attempt - try to import directly
+            import tools_registry
+    except ImportError:
+        # If direct import fails, try relative import
+        if os.path.exists(os.path.join(script_dir, 'tools_registry.py')):
+            spec = importlib.util.spec_from_file_location("tools_registry", 
+                                                         os.path.join(script_dir, "tools_registry.py"))
+            tools_registry = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(tools_registry)
+        else:
+            raise ImportError("Could not find tools_registry.py in any search path")
+    
     from tools_registry import get_tools_registry
+    
     # Import functions instead of direct data
     try:
         from extensive_kali_tools import (
@@ -101,9 +132,14 @@ try:
                     return tool
             return None
 except ImportError as e:
-    print(f"Error: Could not import PAW modules: {e}")
+    print(f"Error: Could not import PAW tools_registry module: {e}")
     print("Make sure PAW is installed correctly and this script is in the correct directory.")
     print("You can install PAW by running: bash install.sh")
+    print("Current Python path:", sys.path)
+    import os
+    print("Current directory contents:", os.listdir(script_dir))
+    if os.path.exists(lib_dir):
+        print("lib directory contents:", os.listdir(lib_dir))
     sys.exit(1)
 
 # Configuration

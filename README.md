@@ -146,7 +146,82 @@ If you'd like to contribute:
 
 ## Troubleshooting
 
-- **Import errors**: Make sure PAW is installed correctly and its modules are in your Python path
+### Import Errors
+
+If you encounter errors like `Could not import PAW tools_registry module`, follow these steps:
+
+1. **Fix Python Path Issues**:
+   ```bash
+   # Run the fix script (as root/sudo)
+   sudo ./fix_paw.sh
+   ```
+
+2. **Manual Fix**:
+   If the fix script isn't available, manually copy the `tools_registry.py` file:
+   ```bash
+   sudo cp tools_registry.py /usr/local/share/paw/lib/
+   sudo cp tools_registry.py /usr/local/share/paw/ 
+   ```
+
+3. **Fix PYTHONPATH**:
+   Ensure the Python path includes the necessary directories:
+   ```bash
+   export PYTHONPATH=/usr/local/share/paw/lib:/usr/local/share/paw:$PYTHONPATH
+   ```
+
+4. **Verify Installation**:
+   Use the verification script to check if everything is set up correctly:
+   ```bash
+   sudo python3 verify_paw.py
+   ```
+
+5. **Ensure Proper Command Files**:
+   Check that the `paw` command script correctly sets the Python path:
+   ```bash
+   cat /usr/local/bin/paw
+   ```
+   It should include lines to set PYTHONPATH to include `/usr/local/share/paw/lib`
+
+### Common Problems and Solutions
+
+- **Module Not Found**: If Python modules can't be found, make sure all necessary files were copied during installation and the Python path is set correctly.
+
+- **Permission Issues**: Make sure all files and directories have the correct permissions:
+  ```bash
+  sudo chmod -R 755 /usr/local/share/paw
+  sudo chmod 644 /usr/local/share/paw/lib/tools_registry.py
+  ```
+
+- **Missing Files**: If files are missing, reinstall PAW or manually copy them from the source repository.
+
+- **Ollama Connection Issues**: If you're having trouble connecting to Ollama, ensure it's running:
+  ```bash
+  # Check if Ollama is running
+  curl http://localhost:11434/api/tags
+  
+  # If not running, start it
+  ollama serve
+  ```
+
+- **Model Issues**: If the configured model isn't available:
+  ```bash
+  # List available models
+  ollama list
+  
+  # Pull the required model
+  ollama pull qwen2.5-coder:7b
+  ```
+
+For more serious installation problems, try completely reinstalling PAW:
+```bash
+# Remove existing installation
+sudo rm -rf /usr/local/share/paw
+sudo rm -f /usr/local/bin/paw /usr/local/bin/PAW
+
+# Reinstall
+sudo ./install.sh
+```
+
 - **Missing tools**: Some tools may need to be installed separately if you're not using Kali Linux
 - **Permission issues**: Ensure you have write access to the PAW configuration directory
 

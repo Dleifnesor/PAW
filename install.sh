@@ -82,7 +82,13 @@ mkdir -p "$INSTALL_DIR/lib"
 # Copy Python files to lib directory
 cp ascii_art.py "$INSTALL_DIR/lib/"
 cp tools_registry.py "$INSTALL_DIR/lib/"
+# Also copy to main directory for backward compatibility
+cp tools_registry.py "$INSTALL_DIR/"
 cp extensive_kali_tools.py "$INSTALL_DIR/lib/"
+
+# Make sure appropriate __init__.py files exist
+touch "$INSTALL_DIR/lib/__init__.py"
+touch "$INSTALL_DIR/custom_commands/__init__.py"
 
 # Copy other files
 cp -r custom_commands/* "$INSTALL_DIR/custom_commands/" 2>/dev/null || echo "Note: No custom commands found, creating empty directory"
@@ -104,24 +110,54 @@ fi
 cp README.md "$DOC_DIR/"
 cp examples.md "$DOC_DIR/" 2>/dev/null || echo "Note: examples.md not found, skipping"
 
-# Create __init__.py files for proper importing
-touch "$INSTALL_DIR/lib/__init__.py"
-touch "$INSTALL_DIR/custom_commands/__init__.py"
-
 # Create commands
 echo "Creating commands..."
 cat > "$BIN_DIR/PAW" << 'EOF'
 #!/bin/bash
-export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
-python3 /usr/local/share/paw/paw.py "$@"
+
+# Ensure lib directory is in Python path
+INSTALL_DIR="/usr/local/share/paw"
+LIB_DIR="$INSTALL_DIR/lib"
+
+# Set Python path to include all necessary directories
+export PYTHONPATH="$INSTALL_DIR:$LIB_DIR:$PYTHONPATH"
+
+# Check if tools_registry.py exists
+if [ ! -f "$LIB_DIR/tools_registry.py" ]; then
+  echo "Warning: Missing tools_registry.py in $LIB_DIR"
+  # Check if it's in the main directory
+  if [ -f "$INSTALL_DIR/tools_registry.py" ]; then
+    echo "Found tools_registry.py in $INSTALL_DIR, creating symlink"
+    ln -sf "$INSTALL_DIR/tools_registry.py" "$LIB_DIR/tools_registry.py"
+  fi
+fi
+
+python3 "$INSTALL_DIR/paw.py" "$@"
 EOF
 chmod +x "$BIN_DIR/PAW"
 
 # Also create lowercase command for compatibility
 cat > "$BIN_DIR/paw" << 'EOF'
 #!/bin/bash
-export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
-python3 /usr/local/share/paw/paw.py "$@"
+
+# Ensure lib directory is in Python path
+INSTALL_DIR="/usr/local/share/paw"
+LIB_DIR="$INSTALL_DIR/lib"
+
+# Set Python path to include all necessary directories
+export PYTHONPATH="$INSTALL_DIR:$LIB_DIR:$PYTHONPATH"
+
+# Check if tools_registry.py exists
+if [ ! -f "$LIB_DIR/tools_registry.py" ]; then
+  echo "Warning: Missing tools_registry.py in $LIB_DIR"
+  # Check if it's in the main directory
+  if [ -f "$INSTALL_DIR/tools_registry.py" ]; then
+    echo "Found tools_registry.py in $INSTALL_DIR, creating symlink"
+    ln -sf "$INSTALL_DIR/tools_registry.py" "$LIB_DIR/tools_registry.py"
+  fi
+fi
+
+python3 "$INSTALL_DIR/paw.py" "$@"
 EOF
 chmod +x "$BIN_DIR/paw"
 
