@@ -20,6 +20,12 @@ mkdir -p "${OLLAMA_BIN}"
 mkdir -p "${OLLAMA_MODELS}"
 mkdir -p "${OLLAMA_CONFIG}"
 
+# Check for required tools
+if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+    echo "Neither curl nor wget found. Installing wget..."
+    apt-get update && apt-get install -y wget
+fi
+
 # Detect architecture
 ARCH=$(uname -m)
 if [[ "${ARCH}" == "x86_64" ]]; then
@@ -31,27 +37,105 @@ else
     exit 1
 fi
 
-# Download Ollama - fixed URL and added error checking
-echo "Downloading Ollama..."
-DOWNLOAD_URL="https://github.com/ollama/ollama/releases/latest/download/${OLLAMA_PACKAGE}"
-if ! curl -L "${DOWNLOAD_URL}" -o "${OLLAMA_BIN}/ollama"; then
-    echo "Error: Failed to download Ollama from ${DOWNLOAD_URL}"
-    exit 1
+# Get the latest GitHub release version (with fallback)
+LATEST_VERSION="v0.1.27"
+if command -v curl &> /dev/null; then
+    VERSION=$(curl -s https://api.github.com/repos/ollama/ollama/releases/latest | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4)
+    if [ -n "$VERSION" ]; then
+        LATEST_VERSION=$VERSION
+    fi
+elif command -v wget &> /dev/null; then
+    VERSION=$(wget -qO- https://api.github.com/repos/ollama/ollama/releases/latest | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4)
+    if [ -n "$VERSION" ]; then
+        LATEST_VERSION=$VERSION
+    fi
+fi
+
+echo "Using Ollama version: ${LATEST_VERSION}"
+
+# Define direct download URL to the binary
+DOWNLOAD_URL="https://github.com/ollama/ollama/releases/download/${LATEST_VERSION}/${OLLAMA_PACKAGE}"
+echo "Download URL: ${DOWNLOAD_URL}"
+
+# Attempt download with different methods
+echo "Downloading Ollama binary..."
+download_success=false
+
+# Try wget first if available
+if command -v wget &> /dev/null && ! $download_success; then
+    echo "Attempting download with wget..."
+    if wget -q --show-progress "${DOWNLOAD_URL}" -O "${OLLAMA_BIN}/ollama"; then
+        download_success=true
+        echo "Download with wget successful!"
+    else
+        echo "wget download failed."
+    fi
+fi
+
+# Try curl if wget failed or isn't available
+if command -v curl &> /dev/null && ! $download_success; then
+    echo "Attempting download with curl..."
+    if curl -L -f -o "${OLLAMA_BIN}/ollama" "${DOWNLOAD_URL}"; then
+        download_success=true
+        echo "Download with curl successful!"
+    else
+        echo "curl download failed."
+    fi
+fi
+
+# Check if download succeeded
+if ! $download_success; then
+    echo "ERROR: Failed to download Ollama binary."
+    echo "Attempting to use a fixed version as fallback..."
+    
+    # Try with a specific working version as fallback
+    FIXED_VERSION="v0.1.27"
+    FIXED_URL="https://github.com/ollama/ollama/releases/download/${FIXED_VERSION}/${OLLAMA_PACKAGE}"
+    echo "Trying fixed URL: ${FIXED_URL}"
+    
+    if command -v wget &> /dev/null; then
+        if wget -q --show-progress "${FIXED_URL}" -O "${OLLAMA_BIN}/ollama"; then
+            download_success=true
+            echo "Download with fixed version successful!"
+        fi
+    elif command -v curl &> /dev/null; then
+        if curl -L -f -o "${OLLAMA_BIN}/ollama" "${FIXED_URL}"; then
+            download_success=true
+            echo "Download with fixed version successful!"
+        fi
+    fi
+    
+    if ! $download_success; then
+        echo "ERROR: All download attempts failed."
+        echo "Please manually download Ollama from https://github.com/ollama/ollama/releases"
+        echo "and place it in ${OLLAMA_BIN}/ollama"
+        exit 1
+    fi
 fi
 
 # Make the binary executable
 chmod +x "${OLLAMA_BIN}/ollama"
-if [ ! -x "${OLLAMA_BIN}/ollama" ]; then
-    echo "Error: Failed to make Ollama executable"
+
+# Verify binary starts with ELF header (quick check that it's a binary, not HTML/text)
+if ! head -c 4 "${OLLAMA_BIN}/ollama" | grep -q "ELF"; then
+    echo "ERROR: Downloaded file is not a valid binary executable."
+    echo "File content starts with:"
+    head -n 1 "${OLLAMA_BIN}/ollama"
+    echo "Removing invalid file..."
+    rm "${OLLAMA_BIN}/ollama"
+    echo "Please try running the script again or download manually."
     exit 1
 fi
 
-echo "Ollama binary downloaded successfully"
+# Get binary size
+file_size=$(stat -c%s "${OLLAMA_BIN}/ollama" 2>/dev/null || stat -f%z "${OLLAMA_BIN}/ollama")
+echo "Ollama binary downloaded successfully (${file_size} bytes)"
 
 # Create wrapper script with environment variables
 cat > "${OLLAMA_DIR}/run_ollama.sh" << 'EOF'
 #!/bin/bash
-SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+# Get the directory of this script
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 CURRENT_DIR=$(pwd)
 
 # Set Ollama environment variables
@@ -65,7 +149,8 @@ EOF
 # Create client script
 cat > "${OLLAMA_DIR}/ollama" << 'EOF'
 #!/bin/bash
-SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+# Get the directory of this script
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 CURRENT_DIR=$(pwd)
 
 # Set Ollama environment variables
@@ -113,14 +198,48 @@ EOF
 
 chmod +x "${CURRENT_DIR}/run_paw.sh"
 
-# Verify installation
-if [ ! -f "${OLLAMA_BIN}/ollama" ]; then
-    echo "Error: Ollama installation failed. Binary not found."
-    exit 1
-fi
-
 # Check if pull_model.sh exists and make it executable
 if [ -f "${CURRENT_DIR}/pull_model.sh" ]; then
+    chmod +x "${CURRENT_DIR}/pull_model.sh"
+    
+    # Also update pull_model.sh script to use readlink -f
+    cp "${CURRENT_DIR}/pull_model.sh" "${CURRENT_DIR}/pull_model.sh.bak"
+    cat > "${CURRENT_DIR}/pull_model.sh" << 'EOF'
+#!/bin/bash
+
+# Pull a model with the local Ollama installation
+
+if [ $# -eq 0 ]; then
+  echo "Usage: $0 <model_name>"
+  echo "Example: $0 qwen2.5-coder:7b"
+  exit 1
+fi
+
+MODEL_NAME="$1"
+CURRENT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Check if Ollama is installed locally
+if [ ! -d "${CURRENT_DIR}/ollama" ]; then
+  echo "Error: Local Ollama installation not found!"
+  echo "Please run ./install_local_ollama.sh first."
+  exit 1
+fi
+
+# Make sure OLLAMA_MODELS env var is set
+export OLLAMA_MODELS="${CURRENT_DIR}/models"
+
+echo "Pulling model: ${MODEL_NAME}"
+echo "Models will be stored in: ${OLLAMA_MODELS}"
+echo ""
+
+# Run Ollama pull
+"${CURRENT_DIR}/ollama/ollama" pull "${MODEL_NAME}"
+
+echo ""
+echo "Model downloaded successfully!"
+echo "You can now use this model with PAW by editing paw-local-config.ini"
+echo ""
+EOF
     chmod +x "${CURRENT_DIR}/pull_model.sh"
     
     # Ask if the user wants to pull the recommended model
@@ -138,6 +257,7 @@ if [ -f "${CURRENT_DIR}/pull_model.sh" ]; then
         # Check if server is running, if not start it in background
         if ! curl -s --connect-timeout 2 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
             echo "Starting Ollama server in background..."
+            # Start the server using the full path
             nohup "${OLLAMA_DIR}/run_ollama.sh" > "${CURRENT_DIR}/ollama_server.log" 2>&1 &
             
             # Wait for server to start
@@ -167,10 +287,10 @@ echo ""
 echo "Ollama has been installed locally!"
 echo ""
 echo "To start the Ollama server:"
-echo "  ./ollama/run_ollama.sh"
+echo "  ${OLLAMA_DIR}/run_ollama.sh"
 echo ""
 echo "To use Ollama client:"
-echo "  ./ollama/ollama <command>"
+echo "  ${OLLAMA_DIR}/ollama <command>"
 echo ""
 echo "To pull a model:"
 echo "  ./pull_model.sh <model_name>"

@@ -964,94 +964,88 @@ Provide the specific commands that would accomplish this task, explaining what e
         command_index = 0
         total_commands = len(commands)
         
-        while command_index < total_commands:
-            cmd = commands[command_index]
-            explanation = explanations[command_index] if command_index < len(explanations) else ""
-            
-            # Display the command and ask for confirmation
-            if self.display_single_command(cmd, explanation, command_index + 1, total_commands):
-                # Execute with current variables from previous commands
-                result = self.execute_command(cmd, variables)
-                
-                # Update variables with new ones from this command
-                variables = result["variables"]
-                
-                # Display result
-                self.display_result(result, command_index + 1, total_commands)
-                
-                # Handle command failures with retry
-                if result["exit_code"] != 0:
-                    retry_result, should_continue = self.retry_failed_command(result, variables)
-                    
-                    if should_continue is None:  # User chose to abort
-                        if RICH_AVAILABLE:
-                            console.print("[bold red]Execution aborted by user[/]")
-                        else:
-                            print("\n\033[1;31m[!] Execution aborted by user\033[0m")
-                        return
-                    
-                    if should_continue:  # User chose to retry with fix
-                        # Replace the failed result with retry result
-                        result = retry_result
-                        # Update variables with any new ones from retry
-                        variables = result["variables"]
-                
-                # In adaptive mode, generate the next command based on the current result if this is the last known command
-                if command_index == total_commands - 1 and result["exit_code"] == 0:
-                    # Format previous output for prompt
-                    prev_output = f"STDOUT:\n{result['stdout']}\n\nSTDERR:\n{result['stderr']}"
-                    
-                    # Ask if user wants to continue
-                    if RICH_AVAILABLE:
-                        console.print("\n[bold cyan]Command completed successfully[/]")
-                        continue_workflow = Confirm.ask("Generate next command based on this output?", default=True)
-                    else:
-                        print("\n\033[1;36m[*] Command completed successfully\033[0m")
-                        continue_workflow = input("\n\033[1;35m[?] Generate next command based on this output? (y/n): \033[0m").lower() == 'y'
-                    
-                    if continue_workflow:
-                        if RICH_AVAILABLE:
-                            with Progress(
-                                SpinnerColumn(),
-                                TextColumn("[bold cyan]Generating next command...[/]"),
-                                console=console,
-                                transient=True
-                            ) as progress:
-                                task = progress.add_task("Thinking...", total=None)
-                                next_cmd, next_explanation = self.generate_next_command(
-                                    request, result["command"], prev_output, variables
-                                )
-                        else:
-                            print("\n\033[1;34m[*] Generating next command...\033[0m")
-                            next_cmd, next_explanation = self.generate_next_command(
-                                request, result["command"], prev_output, variables
-                            )
-                        
-                        if next_cmd:
-                            # Add the command to our list and continue loop
-                            commands.append(next_cmd)
-                            explanations.append(next_explanation)
-                            total_commands = len(commands)
-                            # Do not increment command_index yet - we'll show this command for approval first
-                        else:
-                            # No next command could be generated
-                            if RICH_AVAILABLE:
-                                console.print("[bold yellow]Could not generate a next command. Workflow complete.[/]")
-                            else:
-                                print("\033[1;33m[!] Could not generate a next command. Workflow complete.\033[0m")
-                            break
-                    else:
-                        # User chose not to continue
-                        break
-            else:
-                # User skipped this command, move to the next one
-                if RICH_AVAILABLE:
-                    console.print("[yellow]Command skipped[/]")
-                else:
-                    print("\033[1;33m[*] Command skipped\033[0m")
-            
-            # Move to the next command
+        for cmd, explanation in zip(commands, explanations):
             command_index += 1
+            
+            # Clean up the command (remove comments and whitespace)
+            cmd = cmd.split("//")[0].strip()
+            
+            # Substitute variables
+            cmd = self.substitute_variables(cmd, variables)
+            
+            # Display command
+            if RICH_AVAILABLE:
+                self.display_single_command(cmd, explanation, command_index, total_commands)
+            else:
+                print(f"\n\033[1;33m[{command_index}/{total_commands}] Executing:\033[0m {cmd}")
+                print(f"\033[1;36m[*] Explanation:\033[0m {explanation}")
+            
+            # Ask for confirmation
+            if RICH_AVAILABLE:
+                execute = Confirm.ask("Execute this command?", default=True)
+            else:
+                execute = input("\033[1;35m[?] Execute this command? (y/n): \033[0m").lower() == 'y'
+            
+            if not execute:
+                continue
+            
+            # Execute command
+            result = self.execute_command(cmd, variables)
+            
+            # Store output for potential use in next commands
+            prev_output = result["stdout"] + result["stderr"]
+            
+            # Display result
+            self.display_result(result, command_index, total_commands)
+            
+            # If command failed, try to fix it
+            if result["exit_code"] != 0:
+                fixed_cmd = self.fix_failed_command(cmd, result["stderr"], variables)
+                if fixed_cmd != cmd:
+                    if RICH_AVAILABLE:
+                        console.print(f"[bold yellow]Suggested fix:[/] {fixed_cmd}")
+                        retry = Confirm.ask("Try the fixed command?", default=True)
+                    else:
+                        print(f"\033[1;33m[*] Suggested fix:\033[0m {fixed_cmd}")
+                        retry = input("\033[1;35m[?] Try the fixed command? (y/n): \033[0m").lower() == 'y'
+                    
+                    if retry:
+                        result = self.execute_command(fixed_cmd, variables)
+                        self.display_result(result, command_index, total_commands)
+            
+            # Ask if user wants to continue
+            if RICH_AVAILABLE:
+                console.print("\n[bold cyan]Command completed successfully[/]")
+                continue_workflow = Confirm.ask("Generate next command based on this output?", default=True)
+            else:
+                print("\n\033[1;36m[*] Command completed successfully\033[0m")
+                continue_workflow = input("\n\033[1;35m[?] Generate next command based on this output? (y/n): \033[0m").lower() == 'y'
+            
+            if continue_workflow:
+                if RICH_AVAILABLE:
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn("[bold cyan]Generating next command...[/]"),
+                        console=console,
+                        transient=True
+                    ) as progress:
+                        task = progress.add_task("Thinking...", total=None)
+                        next_cmd, next_explanation = self.generate_next_command(
+                            request, result["command"], prev_output, variables
+                        )
+                else:
+                    print("\n\033[1;34m[*] Generating next command...\033[0m")
+                    next_cmd, next_explanation = self.generate_next_command(
+                        request, result["command"], prev_output, variables
+                    )
+                
+                if next_cmd:
+                    commands.append(next_cmd)
+                    explanations.append(next_explanation)
+                    total_commands += 1
+            else:
+                # User chose not to continue
+                break
         
         # Final summary
         if RICH_AVAILABLE:
