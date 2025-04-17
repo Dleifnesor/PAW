@@ -16,16 +16,6 @@ import importlib.util
 import re
 import socket
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-    ]
-)
-logger = logging.getLogger('PAW')
-
 # Add rich library for fancy UI
 try:
     from rich.console import Console
@@ -43,77 +33,54 @@ except ImportError:
     RICH_AVAILABLE = False
 
 # Add the PAW lib directory to the Python path
-script_dir = os.path.dirname(os.path.realpath(__file__))
-if os.path.exists(os.path.join(script_dir, 'tools_registry.py')):
-    # For local development - use current directory
-    sys.path.append(script_dir)
+# Try local lib first, then system path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+local_lib_path = os.path.join(current_dir, 'lib')
+if os.path.exists(local_lib_path):
+    sys.path.append(local_lib_path)
 else:
-    # For system installations - use installed lib directory
     sys.path.append('/usr/local/share/paw/lib')
-    # Also add the script directory itself
-    sys.path.append(script_dir)
 
 try:
     from ascii_art import display_ascii_art
     from tools_registry import get_tools_registry
-    # Import functions instead of direct data
+except ImportError:
+    # Fall back to trying current directory imports
     try:
-        from extensive_kali_tools import (
-            get_all_kali_tools, 
-            get_tool_categories, 
-            get_tools_by_category,
-            get_tool_info as get_external_tool_info
-        )
+        sys.path.append('.')
+        from ascii_art import display_ascii_art
+        from tools_registry import get_tools_registry
     except ImportError:
-        logger.warning("extensive_kali_tools module not found. Limited tool information will be available.")
-        
-        # Define minimal fallback functions for when extensive_kali_tools is not available
-        def get_all_kali_tools():
-            """Fallback function to return a minimal set of common Kali tools."""
-            return [
-                # Basic set of the most common tools - minimized for readability
-                {"name": "nmap", "category": "Information Gathering", "description": "Network scanner"},
-                {"name": "nikto", "category": "Web Application Analysis", "description": "Web server scanner"},
-                {"name": "dirb", "category": "Web Application Analysis", "description": "Web content scanner"},
-                {"name": "hydra", "category": "Password Attacks", "description": "Password cracking tool"}
-            ]
-            
-        def get_tool_categories():
-            """Fallback function to return basic tool categories."""
-            return [
-                "Information Gathering",
-                "Vulnerability Analysis",
-                "Web Application Analysis",
-                "Password Attacks"
-            ]
-            
-        def get_tools_by_category(category):
-            """Fallback function to return tools in a specific category."""
-            tools = get_all_kali_tools()
-            return [tool for tool in tools if tool["category"] == category]
-            
-        def get_external_tool_info(tool_name):
-            """Fallback function to return information about a specific tool."""
-            tools = get_all_kali_tools()
-            for tool in tools:
-                if tool["name"].lower() == tool_name.lower():
-                    return tool
-            return None
-except ImportError as e:
-    print(f"Error: Could not import PAW modules: {e}")
-    print("Make sure PAW is installed correctly and this script is in the correct directory.")
-    print("You can install PAW by running: bash install.sh")
-    sys.exit(1)
+        print("Error: Could not import required modules. Please make sure you're running from the correct directory.")
+        sys.exit(1)
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+    ]
+)
+logger = logging.getLogger('PAW')
 
 # Configuration
-CONFIG_PATH = "/etc/paw/config.ini"
+# Check for environment variable for config path first, otherwise use default
+CONFIG_PATH = os.environ.get("PAW_CONFIG", "/etc/paw/config.ini")
 config = configparser.ConfigParser()
 
+# Check if the specified config file exists
 if os.path.exists(CONFIG_PATH):
     config.read(CONFIG_PATH)
 else:
-    logger.error(f"Configuration file not found: {CONFIG_PATH}")
-    sys.exit(1)
+    # Try a local config file in the current directory if the environment variable isn't set
+    # or the specified file doesn't exist
+    if not os.environ.get("PAW_CONFIG") and os.path.exists("./paw-local-config.ini"):
+        CONFIG_PATH = "./paw-local-config.ini"
+        config.read(CONFIG_PATH)
+    else:
+        logger.error(f"Configuration file not found: {CONFIG_PATH}")
+        sys.exit(1)
 
 MODEL = config['DEFAULT'].get('model', 'qwen2.5-coder:7b')
 OLLAMA_HOST = config['DEFAULT'].get('ollama_host', 'http://localhost:11434')
@@ -221,112 +188,6 @@ class PAW:
         
         # Get config for adaptive mode
         self.adaptive_mode = config['DEFAULT'].getboolean('adaptive_mode', False)
-        
-        # Cache for tool information
-        self.tool_info_cache = {}
-        
-        # Initialize our tool database by calling the external module
-        self.all_kali_tools = get_all_kali_tools()
-        self.tool_categories = get_tool_categories()
-    
-    def get_relevant_tools_for_request(self, request):
-        """Dynamically extract relevant tool information based on the user request"""
-        # Use a cache to prevent regenerating for the same request
-        if request in self.tool_info_cache:
-            return self.tool_info_cache[request]
-            
-        relevant_tools = []
-        request_lower = request.lower()
-        
-        # Keywords that map to categories
-        category_keywords = {
-            "scan": ["Information Gathering", "Vulnerability Analysis"],
-            "network": ["Information Gathering", "Sniffing & Spoofing"],
-            "web": ["Web Application Analysis", "Information Gathering"],
-            "vulnerability": ["Vulnerability Analysis"],
-            "exploit": ["Exploitation Tools"],
-            "password": ["Password Attacks"],
-            "wireless": ["Wireless Attacks"],
-            "reverse": ["Reverse Engineering"],
-            "forensic": ["Forensics"],
-            "database": ["Database Assessment"],
-            "recon": ["Information Gathering", "Reconnaissance"],
-            "brute": ["Password Attacks"],
-            "crack": ["Password Attacks"],
-            "sniff": ["Sniffing & Spoofing"],
-            "spoof": ["Sniffing & Spoofing"],
-            "footprint": ["Information Gathering"],
-            "enumerate": ["Information Gathering"],
-            "social": ["Social Engineering Tools"]
-        }
-        
-        # Common tools to always include
-        important_tools = ["nmap", "hydra", "sqlmap", "metasploit", "dirb", "nikto", "wireshark", "hashcat"]
-        
-        # Find matching categories based on request keywords
-        matching_categories = set()
-        for keyword, categories in category_keywords.items():
-            if keyword in request_lower:
-                for category in categories:
-                    matching_categories.add(category)
-        
-        # If no categories match, include a default set
-        if not matching_categories:
-            matching_categories = {"Information Gathering", "Vulnerability Analysis"}
-            
-        # Select tools from matching categories
-        tools_added = set()
-        for tool in self.all_kali_tools:
-            # Always include important tools
-            if tool["name"] in important_tools and tool["name"] not in tools_added:
-                relevant_tools.append(tool)
-                tools_added.add(tool["name"])
-                continue
-                
-            # Include tools from matching categories
-            if tool["category"] in matching_categories and tool["name"] not in tools_added:
-                relevant_tools.append(tool)
-                tools_added.add(tool["name"])
-                
-            # Include tools specifically mentioned in the request
-            if tool["name"] in request_lower and tool["name"] not in tools_added:
-                relevant_tools.append(tool)
-                tools_added.add(tool["name"])
-                
-        # Cache the result
-        self.tool_info_cache[request] = relevant_tools
-        return relevant_tools
-    
-    def format_tools_for_context(self, tools):
-        """Format tool information for inclusion in the LLM context"""
-        if not tools:
-            return "No specific tools identified for this request."
-            
-        formatted_text = "Available Kali Linux Tools for this task:\n\n"
-        
-        # Group tools by category
-        tools_by_category = {}
-        for tool in tools:
-            category = tool["category"]
-            if category not in tools_by_category:
-                tools_by_category[category] = []
-            tools_by_category[category].append(tool)
-            
-        # Format each category and its tools
-        for category, category_tools in tools_by_category.items():
-            formatted_text += f"{category}:\n"
-            for tool in category_tools:
-                formatted_text += f"  - {tool['name']}: {tool['description']}\n"
-                
-                # Add example commands if available
-                if "examples" in tool and tool["examples"]:
-                    formatted_text += "    Examples:\n"
-                    # Limit to 3 examples to keep context manageable
-                    for i, example in enumerate(tool["examples"][:3]):
-                        formatted_text += f"      * {example['description']}: {example['command']}\n"
-                formatted_text += "\n"
-        
-        return formatted_text
     
     def generate_llm_response(self, prompt):
         """Generate a response from the LLM using Ollama."""
@@ -349,7 +210,7 @@ class PAW:
                         json={
                             "model": MODEL,
                             "prompt": prompt,
-                            "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. You can access detailed information about security tools by using the special syntax: [TOOL:tool_name] or [CATEGORY:category_name]. Output JSON with {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. Be concise and focus on practical commands.",
+                            "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Your job is to help users perform cybersecurity tasks by translating natural language requests into a sequence of commands. For each request, output a JSON object with the following structure: {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. The 'plan' should outline the steps to achieve the user's goal, 'commands' should list the actual Linux commands to execute (one per line), and 'explanation' should provide context for what each command does.",
                             "stream": False,
                         },
                         timeout=LLM_TIMEOUT
@@ -361,7 +222,7 @@ class PAW:
                     json={
                         "model": MODEL,
                         "prompt": prompt,
-                        "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. You can access detailed information about security tools by using the special syntax: [TOOL:tool_name] or [CATEGORY:category_name]. Output JSON with {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. Be concise and focus on practical commands.",
+                        "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Your job is to help users perform cybersecurity tasks by translating natural language requests into a sequence of commands. For each request, output a JSON object with the following structure: {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. The 'plan' should outline the steps to achieve the user's goal, 'commands' should list the actual Linux commands to execute (one per line), and 'explanation' should provide context for what each command does.",
                         "stream": False,
                     },
                     timeout=LLM_TIMEOUT
@@ -372,17 +233,7 @@ class PAW:
                 return {"error": f"Ollama API error: {response.status_code}"}
             
             result = response.json()
-            response_text = result.get("response", "")
-            
-            # Process any tool queries in the response
-            processed_response = self.process_tool_queries(response_text)
-            
-            # If tool queries were found, send the processed response back to the LLM
-            if processed_response != response_text:
-                logger.info("Tool queries detected, sending follow-up request")
-                return self.generate_llm_response(processed_response)
-            
-            return self.extract_json_from_response(response_text)
+            return self.extract_json_from_response(result.get("response", ""))
             
         except httpx.TimeoutException:
             logger.error(f"LLM request timed out after {LLM_TIMEOUT} seconds")
@@ -390,104 +241,6 @@ class PAW:
         except Exception as e:
             logger.error(f"Error generating LLM response: {e}")
             return {"error": str(e)}
-    
-    def process_tool_queries(self, text):
-        """Process any tool or category queries in the text and replace with actual tool information."""
-        # Check for tool queries using [TOOL:tool_name] syntax
-        tool_pattern = r'\[TOOL:(.*?)\]'
-        tool_queries = re.findall(tool_pattern, text)
-        
-        # Check for category queries using [CATEGORY:category_name] syntax
-        category_pattern = r'\[CATEGORY:(.*?)\]'
-        category_queries = re.findall(category_pattern, text)
-        
-        # If no queries found, return the original text
-        if not tool_queries and not category_queries:
-            return text
-            
-        # Process tool queries
-        for tool_name in tool_queries:
-            tool_name = tool_name.strip().lower()
-            tool_info = self.get_tool_info(tool_name)
-            text = text.replace(f"[TOOL:{tool_name}]", tool_info)
-            
-        # Process category queries
-        for category_name in category_queries:
-            category_name = category_name.strip()
-            category_info = self.get_category_info(category_name)
-            text = text.replace(f"[CATEGORY:{category_name}]", category_info)
-            
-        return text
-        
-    def get_tool_info(self, tool_name):
-        """Get detailed information about a specific tool."""
-        # First, try to get tool info from the external module
-        tool = get_external_tool_info(tool_name)
-        
-        if tool:
-            tool_info = f"TOOL: {tool['name']} ({tool['category']})\n"
-            tool_info += f"DESCRIPTION: {tool['description']}\n"
-            
-            if "common_usage" in tool:
-                tool_info += f"USAGE: {tool['common_usage']}\n"
-                
-            if "examples" in tool and tool["examples"]:
-                tool_info += "EXAMPLES:\n"
-                for example in tool["examples"][:5]:  # Limit to 5 examples
-                    tool_info += f"- {example['description']}: {example['command']}\n"
-                    
-            return tool_info
-            
-        # If tool not found, find similar tools
-        similar_tools = []
-        for tool in self.all_kali_tools:
-            if tool_name in tool["name"].lower() or tool["name"].lower() in tool_name:
-                similar_tools.append(tool["name"])
-                
-        if similar_tools:
-            return f"Tool '{tool_name}' not found. Did you mean: {', '.join(similar_tools)}?"
-        else:
-            return f"Tool '{tool_name}' not found in the database."
-            
-    def get_category_info(self, category_name):
-        """Get information about tools in a specific category."""
-        category_info = ""
-        
-        # Try to find exact category match
-        category_match = None
-        for category in self.tool_categories:
-            if category.lower() == category_name.lower():
-                category_match = category
-                break
-                
-        if category_match:
-            # Get tools in this category using the external module
-            category_tools = get_tools_by_category(category_match)
-            
-            if category_tools:
-                category_info = f"CATEGORY: {category_match}\n"
-                category_info += f"Available Tools ({len(category_tools)}):\n"
-                
-                for tool in category_tools[:10]:  # Limit to 10 tools per category
-                    category_info += f"- {tool['name']}: {tool['description']}\n"
-                    
-                if len(category_tools) > 10:
-                    category_info += f"... and {len(category_tools) - 10} more tools\n"
-            else:
-                category_info = f"No tools found in category '{category_match}'."
-        else:
-            # If category not found, suggest similar categories
-            similar_categories = []
-            for category in self.tool_categories:
-                if category_name.lower() in category.lower():
-                    similar_categories.append(category)
-                    
-            if similar_categories:
-                category_info = f"Category '{category_name}' not found. Did you mean: {', '.join(similar_categories)}?"
-            else:
-                category_info = f"Category '{category_name}' not found. Available categories: {', '.join(self.tool_categories[:5])}..."
-                
-        return category_info
     
     def extract_json_from_response(self, text):
         """Extract JSON from the LLM response."""
@@ -737,7 +490,7 @@ class PAW:
                     while process.poll() is None:
                         # Check if we need to allow user to abort
                         elapsed = time.time() - start_time
-                        if elapsed > 30:  # After 30 seconds, show abort option once
+                        if elapsed > 10:  # After 10 seconds, show abort option
                             progress.stop()
                             if Confirm.ask(f"Command running for {int(elapsed)}s. Abort?", default=False):
                                 process.kill()
@@ -749,9 +502,9 @@ class PAW:
                                     "command": command,
                                     "variables": variables
                                 }
-                            # Resume progress and don't ask again
+                            # Resume progress and reset timer to wait another 10s before asking again
                             progress.start()
-                            break  # Exit the prompt loop after first check
+                            start_time = time.time()
                         
                         # Check for output
                         readable, _, _ = select.select([process.stdout, process.stderr], [], [], 0.5)
@@ -898,6 +651,36 @@ class PAW:
                 print(f"\n  \033[1;33m[{i}] Command:\033[0m {cmd}")
                 print(f"      \033[1;32mExplanation:\033[0m {explanation}")
     
+    def display_single_command(self, command, explanation, command_index, total_commands):
+        """Display a single command with its explanation and ask for y/n confirmation."""
+        if RICH_AVAILABLE:
+            table = Table(
+                show_header=True,
+                header_style=f"bold {self.theme['primary']}", 
+                border_style=self.theme['border_style'],
+                padding=(0, 1)
+            )
+            table.add_column("Command", style="bold yellow")
+            table.add_column("Explanation")
+            
+            table.add_row(Syntax(command, "bash", theme=self.theme['code_theme']), explanation)
+            
+            console.print(Panel(
+                table,
+                title=f"[bold]Command {command_index}/{total_commands}[/]",
+                border_style=self.theme['border_style'],
+                padding=(1, 1)
+            ))
+            
+            run_cmd = Prompt.ask("Execute this command?", choices=["y", "n"], default="y")
+            return run_cmd == "y"
+        else:
+            print(f"\n  \033[1;33m[{command_index}/{total_commands}] Command:\033[0m {command}")
+            print(f"      \033[1;32mExplanation:\033[0m {explanation}")
+            
+            run_cmd = input("\033[1;35m[?] Execute this command? [y/n] (y): \033[0m").strip().lower()
+            return run_cmd == "" or run_cmd == "y"
+    
     def display_result(self, result, command_index, total_commands):
         """Display command execution result with fancy formatting."""
         if RICH_AVAILABLE:
@@ -969,27 +752,11 @@ COMMAND OUTPUT:
 Available variables detected:
 {json.dumps(variables, indent=2)}
 
-You have access to a comprehensive database of Kali Linux security tools. To look up information about specific tools or categories, use these special commands:
-- [TOOL:tool_name] - Get detailed information about a specific tool (e.g., [TOOL:nmap])
-- [CATEGORY:category_name] - See available tools in a category (e.g., [CATEGORY:Information Gathering])
-
-IMPORTANT NOTES FOR SCANNING AND SECURITY:
-1. Host Status Handling:
-   - If host is down/unreachable: Try -Pn flag with nmap or ping sweep first
-   - If no response: Consider firewall evasion techniques (-f, -sS, etc.)
-   - Always verify target is legitimate and authorized
-
-2. Port Scanning Strategy:
-   - Start with basic port scan if no ports known
-   - Use service detection (-sV) on open ports
-   - Consider timing (-T4) and intensity based on target
-   - Use NSE scripts for deeper analysis
-
-3. Command Adaptation:
-   - Analyze previous output for errors and warnings
-   - Adjust scan intensity if timeouts occur
-   - Use variables from previous results (ports, services, etc.)
-   - Don't repeat failed approaches
+IMPORTANT NOTES:
+- If the previous command indicates the host is down or unreachable, suggest a command to troubleshoot connectivity or try an alternative approach.
+- If the previous command was nmap and showed the host is down, suggest adding -Pn flag.
+- Do not use <your_ip> placeholders in commands, directly use the detected local IP.
+- Always adapt based on previous output and errors.
 
 Based on the previous command and its output, generate the next most logical command to continue this workflow.
 Respond with a JSON object containing:
@@ -1001,113 +768,39 @@ Respond with a JSON object containing:
 The command should directly use the values from the previous output when appropriate, not placeholders.
 """
         
-        try:
-            # Generate response without using a live display
-            response = self.generate_llm_response(context)
-            
-            if "error" in response:
-                return None, None
-            
-            # Extract the next command and explanation
-            next_command = response.get("command", "")
-            if isinstance(next_command, list) and next_command:
-                next_command = next_command[0]
-            
-            explanation = response.get("explanation", "")
-            if isinstance(explanation, list) and explanation:
-                explanation = explanation[0]
-
-            # Substitute any remaining placeholders
-            next_command = self.substitute_variables(next_command, variables)
-                
-            return next_command, explanation
-        except Exception as e:
-            logger.error(f"Error generating next command: {e}")
+        response = self.generate_llm_response(context)
+        
+        if "error" in response:
             return None, None
+        
+        # Extract the next command and explanation
+        next_command = response.get("command", "")
+        if isinstance(next_command, list) and next_command:
+            next_command = next_command[0]
+        
+        explanation = response.get("explanation", "")
+        if isinstance(explanation, list) and explanation:
+            explanation = explanation[0]
+
+        # Substitute any remaining placeholders
+        next_command = self.substitute_variables(next_command, variables)
+            
+        return next_command, explanation
     
     def interactive_command_selection(self, commands, explanations):
-        """Allow user to selectively run or edit commands."""
+        """Allow user to selectively run commands one by one with y/n confirmation."""
         selected_commands = []
         
-        if RICH_AVAILABLE:
-            console.print("\n[bold cyan]Would you like to run these commands?[/]")
-            
-            options = [
-                "Run all commands",
-                "Select commands to run",
-                "Edit commands before running", 
-                "Run commands one at a time (progressive mode)",
-                "Cancel execution"
-            ]
-            
-            # Default to progressive mode (option 4) if already in adaptive/progressive mode
-            default_choice = "4" if self.adaptive_mode else "1"
-            
-            choice = Prompt.ask(
-                "Choose an option",
-                choices=["1", "2", "3", "4", "5"],
-                default=default_choice
-            )
-            
-            if choice == "1":
-                self.adaptive_mode = False
-                return commands, self.adaptive_mode  # Run all commands
-            elif choice == "2":
-                # Select which commands to run
-                self.adaptive_mode = False
-                for i, (cmd, explanation) in enumerate(zip(commands, explanations), 1):
-                    console.print(f"\n[bold]{i}.[/] {cmd}")
-                    console.print(f"   [dim]{explanation}[/]")
-                    run_cmd = Confirm.ask(f"Run this command?", default=True)
-                    if run_cmd:
-                        selected_commands.append(cmd)
-                return selected_commands, self.adaptive_mode
-            elif choice == "3":
-                # Edit commands before running
-                self.adaptive_mode = False
-                for i, (cmd, explanation) in enumerate(zip(commands, explanations), 1):
-                    console.print(f"\n[bold]{i}.[/] [yellow]{cmd}[/]")
-                    console.print(f"   [dim]{explanation}[/]")
-                    edit = Confirm.ask(f"Edit this command?", default=False)
-                    if edit:
-                        edited_cmd = Prompt.ask("Enter edited command", default=cmd)
-                        selected_commands.append(edited_cmd)
-                    else:
-                        selected_commands.append(cmd)
-                return selected_commands, self.adaptive_mode
-            elif choice == "4":
-                # Run progressively, one at a time
-                self.adaptive_mode = True
-                # Only return the first command
-                if commands:
-                    return [commands[0]], self.adaptive_mode
-                return [], self.adaptive_mode
-            else:
-                return [], False  # Cancel execution
-        else:
-            console.print("\n[*] Options:")
-            console.print("  1. Run all commands")
-            console.print("  2. Run commands one at a time (progressive mode)")
-            console.print("  3. Cancel execution")
-            
-            # Default to progressive mode if already in adaptive/progressive mode
-            default_choice = "2" if self.adaptive_mode else "1"
-            choice_prompt = f"\033[1;35m[?] Choose an option (1/2/3) [{default_choice}]: \033[0m"
-            
-            choice_input = input(choice_prompt).strip()
-            choice = choice_input if choice_input else default_choice
-            
-            if choice == "1":
-                self.adaptive_mode = False
-                return commands, self.adaptive_mode  # Run all commands
-            elif choice == "2":
-                self.adaptive_mode = True
-                # Only return the first command
-                if commands:
-                    return [commands[0]], self.adaptive_mode
-                return [], self.adaptive_mode
-            else:
-                return [], False  # Cancel execution
+        # Always use progressive mode with one-by-one execution
+        self.adaptive_mode = True
+        
+        # Only return the first command if approved
+        if commands and explanations:
+            if self.display_single_command(commands[0], explanations[0], 1, len(commands)):
+                return [commands[0]], self.adaptive_mode
+        
+        # If user doesn't approve the first command or there are no commands
+        return [], self.adaptive_mode
     
     def retry_failed_command(self, result, variables):
         """Handle failed command with retry options."""
@@ -1126,51 +819,21 @@ The command should directly use the values from the previous output when appropr
             if fixed_command != result['command']:
                 console.print(f"[bold green]Suggested fix:[/] {fixed_command}")
                 
-                options = [
-                    "Use suggested fix",
-                    "Edit command manually",
-                    "Skip this command",
-                    "Abort execution"
-                ]
-                
-                choice = Prompt.ask(
-                    "How would you like to proceed?",
-                    choices=["1", "2", "3", "4"],
-                    default="1"
-                )
-                
-                if choice == "1":
+                run_fixed = Prompt.ask("Execute this fixed command?", choices=["y", "n"], default="y")
+                if run_fixed == "y":
                     return self.execute_command(fixed_command, updated_vars), True
-                elif choice == "2":
-                    manual_cmd = Prompt.ask("Enter fixed command", default=fixed_command)
-                    return self.execute_command(manual_cmd, updated_vars), True
-                elif choice == "3":
-                    return result, False  # Skip but continue workflow
                 else:
-                    return result, None  # Abort entirely
+                    return result, False
             else:
-                # Couldn't auto-fix, ask user
-                options = [
-                    "Edit command manually",
-                    "Skip this command",
-                    "Abort execution"
-                ]
+                # No automated fix available
+                console.print("[bold yellow]No automated fix available for this error.[/]")
+                skip_cmd = Prompt.ask("Skip this command?", choices=["y", "n"], default="n")
                 
-                choice = Prompt.ask(
-                    "How would you like to proceed?",
-                    choices=["1", "2", "3"],
-                    default="1"
-                )
-                
-                if choice == "1":
-                    manual_cmd = Prompt.ask("Enter fixed command", default=result['command'])
-                    return self.execute_command(manual_cmd, variables), True
-                elif choice == "2":
+                if skip_cmd == "y":
                     return result, False
                 else:
-                    return result, None
+                    return result, None  # Abort execution
         else:
-            # Basic terminal UI version
             print(f"\033[1;31m[!] Command failed: {result['command']}\033[0m")
             print(f"\033[1;31m[!] Error: {result['stderr']}\033[0m")
             
@@ -1182,27 +845,20 @@ The command should directly use the values from the previous output when appropr
             if fixed_command != result['command']:
                 print(f"\033[1;32m[+] Suggested fix: {fixed_command}\033[0m")
                 
-                choice = input("\033[1;35m[?] Use suggested fix (y), edit manually (e), skip (s), or abort (a)? \033[0m").lower()
-                
-                if choice == 'y':
+                run_fixed = input("\033[1;35m[?] Execute this fixed command? [y/n] (y): \033[0m").strip().lower()
+                if run_fixed == "" or run_fixed == "y":
                     return self.execute_command(fixed_command, updated_vars), True
-                elif choice == 'e':
-                    manual_cmd = input(f"\033[1;35m[?] Enter fixed command: \033[0m")
-                    return self.execute_command(manual_cmd, updated_vars), True
-                elif choice == 's':
-                    return result, False
                 else:
-                    return result, None
+                    return result, False
             else:
-                choice = input("\033[1;35m[?] Edit manually (e), skip (s), or abort (a)? \033[0m").lower()
+                # No automated fix available
+                print("\033[1;33m[!] No automated fix available for this error.\033[0m")
+                skip_cmd = input("\033[1;35m[?] Skip this command? [y/n] (n): \033[0m").strip().lower()
                 
-                if choice == 'e':
-                    manual_cmd = input(f"\033[1;35m[?] Enter fixed command: \033[0m")
-                    return self.execute_command(manual_cmd, variables), True
-                elif choice == 's':
+                if skip_cmd == "y":
                     return result, False
                 else:
-                    return result, None
+                    return result, None  # Abort execution
     
     def process_request(self, request, adaptive_override=None):
         """Process a natural language request."""
@@ -1210,40 +866,72 @@ The command should directly use the values from the previous output when appropr
         if adaptive_override is not None:
             self.adaptive_mode = adaptive_override
         else:
-            # Default to adaptive/progressive mode
+            # Always use adaptive mode for the new one-by-one execution flow
             self.adaptive_mode = True
             
         # Clean up the request
         request = request.replace('\r', '').strip()
         
-        # Generate initial LLM response with tool-querying capability
+        # Generate LLM response
         context = f"""
 As PAW (Prompt Assisted Workflow), analyze this cybersecurity request and provide a plan of action:
 
 REQUEST: {request}
 
-You have access to a comprehensive database of Kali Linux security tools. To look up information about specific tools or categories, use these special commands:
-- [TOOL:tool_name] - Get detailed information about a specific tool (e.g., [TOOL:nmap])
-- [CATEGORY:category_name] - See available tools in a category (e.g., [CATEGORY:Information Gathering])
+Consider the following Kali Linux tools and their key options when appropriate:
 
-Available categories include: Information Gathering, Vulnerability Analysis, Web Application Analysis, 
-Database Assessment, Password Attacks, Wireless Attacks, Exploitation Tools, Sniffing & Spoofing, 
-Reverse Engineering, and more.
+1. Network scanning:
+   - nmap: -sS (stealth scan), -sV (version detection), -O (OS detection), -A (aggressive), -p (port range), -Pn (skip discovery)
+   - masscan: -p (ports), --rate (packets per second), --range (scan range), --banners (capture banners)
+   - netdiscover: -r (range), -i (interface), -p (passive mode)
 
-Common tools include: nmap, nikto, dirb, hydra, sqlmap, metasploit, wireshark, aircrack-ng, hashcat, 
-john, and many others. You can query for more specific tools as needed.
+2. Web scanning:
+   - nikto: -h (host), -port (port to scan), -ssl, -Tuning (scan tuning)
+   - dirb: [url] [wordlist], -a (user agent), -z (delay), -o (output file)
+   - gobuster: -u (url), -w (wordlist), -x (extensions), -t (threads)
+   - wpscan: --url (WordPress URL), --api-token, -e (enumerate)
 
-IMPORTANT SCANNING GUIDELINES:
-1. Always start with common ports (1-1024) or specific service ports
-2. Use -sS (stealth scan) by default for nmap
-3. Add -sV only after finding open ports
-4. Use -Pn if host is blocking ping
-5. For web services, focus on ports 80,443,8080
-6. Use appropriate timing templates (-T4 for most scans)
+3. Vulnerability scanning:
+   - openvas: -u (user), -p (password), -T (target)
+   - nessus: similar to OpenVAS with web interface
+   - lynis: audit system, --pentest (pentest mode)
+
+4. Exploitation:
+   - metasploit: use (module), set (option), exploit/run, sessions
+   - sqlmap: -u (URL), --data (POST data), --dbms (database type), --dump
+   - hydra: -l/-L (login), -p/-P (password), -t (tasks), service://server
+
+5. Reconnaissance:
+   - whois: [domain], -h (host)
+   - theHarvester: -d (domain), -b (source), -l (limit)
+   - recon-ng: use (module), set (option), run
+   - maltego: GUI-based with transforms
+
+6. Password attacks:
+   - hashcat: -m (hash type), -a (attack mode), -o (output file)
+   - john: --wordlist (wordlist file), --rules, --format (hash type)
+   - crunch: [min] [max] [charset], -t (pattern), -o (output)
+
+7. Wireless:
+   - aircrack-ng: -w (wordlist), -b (BSSID)
+   - wifite: -wpa (attack WPA), -wep (attack WEP), -wps (attack WPS)
+   - kismet: -c (interface), -f (file), -s (server mode)
+
+8. Forensics and analysis:
+   - volatility: -f (file), --profile (OS profile), plugin commands
+   - autopsy: GUI-based forensic platform
+   - wireshark/tshark: -i (interface), -c (packet count), -r (read file)
+   - tcpdump: -i (interface), -n (don't resolve), -w (write to file)
+
+9. Specialized tools:
+   - binwalk: -e (extract), -M (recursive scan)
+   - steghide: embed/extract, -sf (stego file), -p (passphrase)
+   - macchanger: -r (random MAC), -m (specified MAC)
+   - enum4linux: -a (all enumeration), -u (user), -p (pass)
+   - msfvenom: -p (payload), -f (format), -e (encoder)
 
 Design your commands to work sequentially as a workflow, where later commands build on the results of earlier ones.
-For commands that need input from previous commands, use placeholders like <target_ip>.
-
+For commands that need input from previous commands, use placeholders like <target_ip> or <discovered_hosts>.
 Provide the specific commands that would accomplish this task, explaining what each command does.
 """
         
@@ -1260,7 +948,7 @@ Provide the specific commands that would accomplish this task, explaining what e
         plan = response.get("plan", [])
         self.display_plan(plan)
         
-        # Get initial command and explanation
+        # Get commands and explanations
         commands = response.get("commands", [])
         explanations = response.get("explanation", [""] * len(commands))
         
@@ -1271,154 +959,99 @@ Provide the specific commands that would accomplish this task, explaining what e
                 print("\033[1;33m[!] No commands were generated for this request.\033[0m")
             return
         
-        # Display mode indicator
-        if RICH_AVAILABLE:
-            console.print(Panel(
-                "[bold cyan]PROGRESSIVE MODE ACTIVE[/] - Commands will be executed one at a time",
-                border_style=self.theme['border_style'],
-                padding=(1, 2)
-            ))
-        else:
-            print("\n\033[1;36m[*] PROGRESSIVE MODE ACTIVE - Commands will be executed one at a time\033[0m")
-        
-        # Execute commands one at a time
-        results = []
+        # Execute commands one by one
         variables = {}  # Store variables for command chaining
         command_index = 0
+        total_commands = len(commands)
         
-        while command_index < len(commands):
+        while command_index < total_commands:
             cmd = commands[command_index]
-            command_index += 1
+            explanation = explanations[command_index] if command_index < len(explanations) else ""
             
-            if RICH_AVAILABLE:
-                console.print(Panel(f"[bold yellow]Command {command_index}:[/] {cmd}", 
-                                   title="[bold cyan]Current Command[/]",
-                                   border_style=self.theme['border_style']))
-            else:
-                print(f"\n\033[1;33m[{command_index}] Executing:\033[0m {cmd}")
-            
-            # Execute with current variables from previous commands
-            result = self.execute_command(cmd, variables)
-            
-            # Update variables with new ones from this command
-            variables = result["variables"]
-            
-            # Handle command failures with retry
-            if result["exit_code"] != 0:
-                retry_result, should_continue = self.retry_failed_command(result, variables)
+            # Display the command and ask for confirmation
+            if self.display_single_command(cmd, explanation, command_index + 1, total_commands):
+                # Execute with current variables from previous commands
+                result = self.execute_command(cmd, variables)
                 
-                if should_continue is None:  # User chose to abort
+                # Update variables with new ones from this command
+                variables = result["variables"]
+                
+                # Display result
+                self.display_result(result, command_index + 1, total_commands)
+                
+                # Handle command failures with retry
+                if result["exit_code"] != 0:
+                    retry_result, should_continue = self.retry_failed_command(result, variables)
+                    
+                    if should_continue is None:  # User chose to abort
+                        if RICH_AVAILABLE:
+                            console.print("[bold red]Execution aborted by user[/]")
+                        else:
+                            print("\n\033[1;31m[!] Execution aborted by user\033[0m")
+                        return
+                    
+                    if should_continue:  # User chose to retry with fix
+                        # Replace the failed result with retry result
+                        result = retry_result
+                        # Update variables with any new ones from retry
+                        variables = result["variables"]
+                
+                # In adaptive mode, generate the next command based on the current result if this is the last known command
+                if command_index == total_commands - 1 and result["exit_code"] == 0:
+                    # Format previous output for prompt
+                    prev_output = f"STDOUT:\n{result['stdout']}\n\nSTDERR:\n{result['stderr']}"
+                    
+                    # Ask if user wants to continue
                     if RICH_AVAILABLE:
-                        console.print("[bold red]Execution aborted by user[/]")
+                        console.print("\n[bold cyan]Command completed successfully[/]")
+                        continue_workflow = Confirm.ask("Generate next command based on this output?", default=True)
                     else:
-                        print("\n\033[1;31m[!] Execution aborted by user\033[0m")
-                    return
-                
-                if should_continue:  # User chose to retry with fix
-                    result = retry_result
-                    variables = result["variables"]
-            
-            # Store the result for summary
-            results.append(result)
-            
-            # Display result
-            self.display_result(result, command_index, "?")
-            
-            # Generate next command based on current result
-            if result["exit_code"] == 0:
-                # Format previous output for prompt
-                prev_output = f"STDOUT:\n{result['stdout']}\n\nSTDERR:\n{result['stderr']}"
-                
-                # Ask if user wants to continue
-                if RICH_AVAILABLE:
-                    console.print("\n[bold cyan]Command completed successfully[/]")
-                    continue_workflow = Confirm.ask("Generate next command based on this output?", default=True)
-                else:
-                    print("\n\033[1;36m[*] Command completed successfully\033[0m")
-                    continue_workflow = input("\n\033[1;35m[?] Generate next command based on this output? (y/n): \033[0m").lower() == 'y'
-                
-                if continue_workflow:
-                    if RICH_AVAILABLE:
-                        with Progress(
-                            SpinnerColumn(),
-                            TextColumn("[bold cyan]Generating next command...[/]"),
-                            console=console,
-                            transient=True
-                        ) as progress:
-                            task = progress.add_task("Thinking...", total=None)
+                        print("\n\033[1;36m[*] Command completed successfully\033[0m")
+                        continue_workflow = input("\n\033[1;35m[?] Generate next command based on this output? (y/n): \033[0m").lower() == 'y'
+                    
+                    if continue_workflow:
+                        if RICH_AVAILABLE:
+                            with Progress(
+                                SpinnerColumn(),
+                                TextColumn("[bold cyan]Generating next command...[/]"),
+                                console=console,
+                                transient=True
+                            ) as progress:
+                                task = progress.add_task("Thinking...", total=None)
+                                next_cmd, next_explanation = self.generate_next_command(
+                                    request, result["command"], prev_output, variables
+                                )
+                        else:
+                            print("\n\033[1;34m[*] Generating next command...\033[0m")
                             next_cmd, next_explanation = self.generate_next_command(
                                 request, result["command"], prev_output, variables
                             )
-                    else:
-                        print("\n\033[1;34m[*] Generating next command...\033[0m")
-                        next_cmd, next_explanation = self.generate_next_command(
-                            request, result["command"], prev_output, variables
-                        )
-                    
-                    if next_cmd:
-                        # Display the suggested next command
-                        if RICH_AVAILABLE:
-                            console.print(Panel(
-                                f"[bold]Suggested next command:[/]\n{next_cmd}\n\n[bold]Explanation:[/]\n{next_explanation}",
-                                title="[bold cyan]Next Command[/]",
-                                border_style=self.theme['border_style']
-                            ))
-                            
-                            # Ask user if they want to use this command, edit it, or finish
-                            options = [
-                                "Use this command",
-                                "Edit this command",
-                                "End workflow"
-                            ]
-                            
-                            next_choice = Prompt.ask(
-                                "How would you like to proceed?",
-                                choices=["1", "2", "3"],
-                                default="1"
-                            )
-                            
-                            if next_choice == "1":
-                                # Add the command to our execution list
-                                commands.append(next_cmd)
-                                explanations.append(next_explanation)
-                            elif next_choice == "2":
-                                # Let user edit the command
-                                edited_cmd = Prompt.ask("Enter edited command", default=next_cmd)
-                                commands.append(edited_cmd)
-                                explanations.append(next_explanation)
-                            else:
-                                # End the workflow
-                                break
+                        
+                        if next_cmd:
+                            # Add the command to our list and continue loop
+                            commands.append(next_cmd)
+                            explanations.append(next_explanation)
+                            total_commands = len(commands)
+                            # Do not increment command_index yet - we'll show this command for approval first
                         else:
-                            print(f"\n\033[1;36m[*] Suggested next command:\033[0m {next_cmd}")
-                            print(f"\033[1;32m[*] Explanation:\033[0m {next_explanation}")
-                            
-                            next_choice = input("\n\033[1;35m[?] Use this command (u), edit it (e), or end workflow (q)? \033[0m").lower()
-                            
-                            if next_choice == 'u':
-                                # Add the command to our execution list
-                                commands.append(next_cmd)
-                                explanations.append(next_explanation)
-                            elif next_choice == 'e':
-                                # Let user edit the command
-                                edited_cmd = input(f"\n\033[1;35m[?] Enter edited command: \033[0m")
-                                commands.append(edited_cmd)
-                                explanations.append(next_explanation)
+                            # No next command could be generated
+                            if RICH_AVAILABLE:
+                                console.print("[bold yellow]Could not generate a next command. Workflow complete.[/]")
                             else:
-                                # End the workflow
-                                break
+                                print("\033[1;33m[!] Could not generate a next command. Workflow complete.\033[0m")
+                            break
                     else:
-                        if RICH_AVAILABLE:
-                            console.print("[bold yellow]Could not generate a next command.[/]")
-                            if Confirm.ask("End workflow?", default=True):
-                                break
-                        else:
-                            print("\033[1;33m[!] Could not generate a next command.\033[0m")
-                            if input("\n\033[1;35m[?] End workflow? (y/n): \033[0m").lower() == 'y':
-                                break
+                        # User chose not to continue
+                        break
+            else:
+                # User skipped this command, move to the next one
+                if RICH_AVAILABLE:
+                    console.print("[yellow]Command skipped[/]")
                 else:
-                    # User chose not to continue
-                    break
+                    print("\033[1;33m[*] Command skipped\033[0m")
+            
+            # Move to the next command
+            command_index += 1
         
         # Final summary
         if RICH_AVAILABLE:
@@ -1426,36 +1059,6 @@ Provide the specific commands that would accomplish this task, explaining what e
                                border_style=self.theme['success']))
         else:
             print("\n\033[1;32m[+] Workflow completed\033[0m")
-        
-        # Generate summary if there are multiple commands
-        if len(results) > 1:
-            summary_prompt = f"""
-Request: {request}
-
-Commands executed:
-{chr(10).join([r["command"] for r in results])}
-
-Results overview:
-{chr(10).join([f"Command {i+1}: Exit code {r['exit_code']}" for i, r in enumerate(results)])}
-
-Please provide a brief summary of the results and what was accomplished.
-"""
-            summary = self.generate_llm_response(summary_prompt)
-            
-            if RICH_AVAILABLE:
-                console.print(Panel(
-                    "\n".join([f"• {point}" for point in summary.get("plan", [])]),
-                    title="[bold]Summary[/]",
-                    border_style=self.theme['border_style'],
-                    padding=(1, 2)
-                ))
-            else:
-                print("\n\033[1;34m[*] Summary:\033[0m")
-                if "error" in summary:
-                    print(f"  Error generating summary: {summary['error']}")
-                else:
-                    for point in summary.get("plan", []):
-                        print(f"  - {point}")
 
 def main():
     parser = argparse.ArgumentParser(description="PAW - Prompt Assisted Workflow for Kali Linux")

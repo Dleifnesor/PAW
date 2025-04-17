@@ -11,6 +11,29 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# Check if the local Ollama installer exists
+if [ -f "./install_local_ollama.sh" ]; then
+  echo ""
+  echo "Local Ollama installer detected."
+  read -p "Would you like to install Ollama locally in the current directory instead of system-wide? (y/n): " install_local
+  
+  if [[ "$install_local" =~ ^[Yy]$ ]]; then
+    echo "Running local Ollama installer..."
+    chmod +x ./install_local_ollama.sh
+    ./install_local_ollama.sh
+    
+    echo ""
+    echo "Local Ollama installation completed."
+    echo "To start using PAW with the local Ollama installation:"
+    echo "1. Start Ollama: ./ollama/run_ollama.sh"
+    echo "2. Run PAW: ./run_paw.sh \"your query\""
+    echo ""
+    exit 0
+  else
+    echo "Continuing with system-wide installation..."
+  fi
+fi
+
 # Define installation paths
 INSTALL_DIR="/usr/local/share/paw"
 BIN_DIR="/usr/local/bin"
@@ -76,33 +99,19 @@ mkdir -p "$LOG_DIR"
 
 # Copy files
 echo "Copying files..."
-# Create lib directory if it doesn't exist
-mkdir -p "$INSTALL_DIR/lib"
-
-# Copy Python files to lib directory
-cp ascii_art.py "$INSTALL_DIR/lib/"
-cp tools_registry.py "$INSTALL_DIR/lib/"
-cp extensive_kali_tools.py "$INSTALL_DIR/lib/"
-
-# Copy other files
+cp -r lib/* "$INSTALL_DIR/lib/" 2>/dev/null || mkdir -p "$INSTALL_DIR/lib"
 cp -r custom_commands/* "$INSTALL_DIR/custom_commands/" 2>/dev/null || echo "Note: No custom commands found, creating empty directory"
 cp paw.py "$INSTALL_DIR/"
 cp add_custom_tool.py "$INSTALL_DIR/"
-
-# Handle paw-config
-if [ -f "paw-config" ]; then
-  if head -n 1 "paw-config" | grep -q "bash"; then
-    cp paw-config "$INSTALL_DIR/paw_config.sh"
-  else
-    cp paw-config "$INSTALL_DIR/paw_config.py"
-  fi
-else
-  echo "Note: paw-config script not found"
-fi
-
-# Copy documentation
+cp extensive_kali_tools.py "$INSTALL_DIR/" 2>/dev/null || echo "Note: extensive_kali_tools.py not found, Kali tools functionality may be limited"
+cp add_kali_tools.py "$INSTALL_DIR/" 2>/dev/null || echo "Note: add_kali_tools.py not found, skipping"
+cp add_tools_example.py "$INSTALL_DIR/" 2>/dev/null || echo "Note: add_tools_example.py not found, skipping"
+cp ascii_art.py "$INSTALL_DIR/lib/"
+cp tools_registry.py "$INSTALL_DIR/lib/"
+cp paw-config "$INSTALL_DIR/paw_config.py" 2>/dev/null || echo "Note: paw-config script not found as a Python file, using bash script instead"
 cp README.md "$DOC_DIR/"
 cp examples.md "$DOC_DIR/" 2>/dev/null || echo "Note: examples.md not found, skipping"
+cp README_KALI_TOOLS.md "$DOC_DIR/" 2>/dev/null || echo "Note: README_KALI_TOOLS.md not found, skipping"
 
 # Create __init__.py files for proper importing
 touch "$INSTALL_DIR/lib/__init__.py"
@@ -112,7 +121,6 @@ touch "$INSTALL_DIR/custom_commands/__init__.py"
 echo "Creating commands..."
 cat > "$BIN_DIR/PAW" << 'EOF'
 #!/bin/bash
-export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
 python3 /usr/local/share/paw/paw.py "$@"
 EOF
 chmod +x "$BIN_DIR/PAW"
@@ -120,77 +128,33 @@ chmod +x "$BIN_DIR/PAW"
 # Also create lowercase command for compatibility
 cat > "$BIN_DIR/paw" << 'EOF'
 #!/bin/bash
-export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
 python3 /usr/local/share/paw/paw.py "$@"
 EOF
 chmod +x "$BIN_DIR/paw"
 
 cat > "$BIN_DIR/add-paw-tool" << 'EOF'
 #!/bin/bash
-export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
 python3 /usr/local/share/paw/add_custom_tool.py "$@"
 EOF
 chmod +x "$BIN_DIR/add-paw-tool"
 
-# Check if paw-config is a bash script or needs to be created
-if [ -f "$INSTALL_DIR/paw_config.sh" ]; then
-  cat > "$BIN_DIR/paw-config" << 'EOF'
+cat > "$BIN_DIR/paw-kali-tools" << 'EOF'
 #!/bin/bash
-export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
-/usr/local/share/paw/paw_config.sh "$@"
+python3 /usr/local/share/paw/extensive_kali_tools.py "$@"
 EOF
+chmod +x "$BIN_DIR/paw-kali-tools"
+
+# Check if paw-config is a bash script or needs to be created
+if [ -f "paw-config" ] && head -n 1 "paw-config" | grep -q "bash"; then
+  cp paw-config "$BIN_DIR/paw-config"
   chmod +x "$BIN_DIR/paw-config"
-elif [ -f "$INSTALL_DIR/paw_config.py" ]; then
+else
   cat > "$BIN_DIR/paw-config" << 'EOF'
 #!/bin/bash
-export PYTHONPATH=/usr/local/share/paw/lib:$PYTHONPATH
 python3 /usr/local/share/paw/paw_config.py "$@"
 EOF
   chmod +x "$BIN_DIR/paw-config"
-else
-  echo "WARNING: paw-config script not found, creating default configuration script"
-  cat > "$BIN_DIR/paw-config" << 'EOF'
-#!/bin/bash
-echo "PAW configuration tool"
-echo "Usage: paw-config [option]"
-echo ""
-echo "Options:"
-echo "  --model <model_name>    Set the default model"
-echo "  --theme <theme_name>    Set the UI theme"
-echo "  --help                  Show this help message"
-EOF
-  chmod +x "$BIN_DIR/paw-config"
 fi
-
-# Create a Python environment file
-echo "Creating Python environment file..."
-cat > "$INSTALL_DIR/lib/paw_env.py" << 'EOF'
-import os
-import sys
-
-# Add the lib directory to Python path
-lib_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lib')
-if lib_dir not in sys.path:
-    sys.path.insert(0, lib_dir)
-EOF
-
-# Make sure the lib directory is in Python path
-echo "Setting up Python path..."
-cat > "$INSTALL_DIR/lib/__init__.py" << 'EOF'
-import os
-import sys
-
-# Add the lib directory to Python path
-lib_dir = os.path.dirname(os.path.abspath(__file__))
-if lib_dir not in sys.path:
-    sys.path.insert(0, lib_dir)
-
-# Import environment setup
-try:
-    from paw_env import *
-except ImportError:
-    pass
-EOF
 
 # Make custom command scripts executable
 chmod +x "$INSTALL_DIR/custom_commands"/*.py 2>/dev/null || echo "No custom commands to make executable"
@@ -205,7 +169,7 @@ ollama_host = http://localhost:11434
 explain_commands = true
 log_commands = true
 log_directory = /var/log/paw
-llm_timeout = 600.0
+llm_timeout = 180.0
 command_timeout = 180.0
 auto_retry = true
 chain_commands = true
@@ -222,13 +186,22 @@ chmod 644 "$CONFIG_DIR/config.ini"
 chmod -R 777 "$LOG_DIR"  # Allow all users to write logs
 chmod -R 755 "$DOC_DIR"
 
+# Run extensive_kali_tools.py to populate the tool registry
+if [ -f "$INSTALL_DIR/extensive_kali_tools.py" ]; then
+  echo "Populating Kali Linux tools registry..."
+  python3 "$INSTALL_DIR/extensive_kali_tools.py" || echo "Warning: Failed to populate Kali tools registry. You can run 'paw-kali-tools' manually after installation."
+else
+  echo "Note: extensive_kali_tools.py not found. Kali tools functionality will be limited."
+  echo "You can manually add Kali tools later using 'paw-kali-tools' if you install the file."
+fi
+
 # Verifying installation...
 echo "Verifying installation..."
 
 # Check commands
 echo -n "Checking command availability: "
 COMMANDS_OK=true
-for cmd in "PAW" "paw" "add-paw-tool" "paw-config"; do
+for cmd in "PAW" "paw" "add-paw-tool" "paw-config" "paw-kali-tools"; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "WARNING: $cmd command is not in path."
     COMMANDS_OK=false
@@ -280,48 +253,20 @@ if command -v ollama >/dev/null 2>&1; then
   if curl -s --connect-timeout 5 http://localhost:11434/api/tags >/dev/null 2>&1; then
     echo "Ollama service is running."
     
-    # Get configured model
+    # Check if the configured model exists
     MODEL=$(grep "^model" "$CONFIG_DIR/config.ini" | cut -d'=' -f2- | tr -d ' ')
     echo "Checking for model: $MODEL"
-    
-    # Get list of available models
-    AVAILABLE_MODELS=$(curl -s http://localhost:11434/api/tags | grep -o '"name":"[^"]*"' | cut -d'"' -f4)
-    
-    if echo "$AVAILABLE_MODELS" | grep -q "^$MODEL$"; then
+    if curl -s http://localhost:11434/api/tags | grep -q "\"name\":\"$MODEL\""; then
       echo "Configured model '$MODEL' is available."
     else
       echo "WARNING: Configured model '$MODEL' is not available in Ollama."
-      
-      # Try to find first available model if Qwen is not available
-      FIRST_AVAILABLE_MODEL=$(echo "$AVAILABLE_MODELS" | head -n1)
-      
-      if [ -n "$FIRST_AVAILABLE_MODEL" ]; then
-        echo "Found available model: $FIRST_AVAILABLE_MODEL"
-        read -p "Would you like to use $FIRST_AVAILABLE_MODEL instead? (y/n): " use_available
-        if [[ "$use_available" =~ ^[Yy]$ ]]; then
-          # Update config with first available model
-          sed -i "s/^model = .*/model = $FIRST_AVAILABLE_MODEL/" "$CONFIG_DIR/config.ini"
-          echo "Updated configuration to use $FIRST_AVAILABLE_MODEL"
-        else
-          read -p "Would you like to pull the configured model ($MODEL) now? (y/n): " pull_model
-          if [[ "$pull_model" =~ ^[Yy]$ ]]; then
-            echo "Pulling model $MODEL (this may take a while)..."
-            ollama pull "$MODEL"
-          else
-            echo "You can pull the model later with: ollama pull $MODEL"
-            echo "Or change the model in /etc/paw/config.ini with: sudo paw-config"
-          fi
-        fi
+      read -p "Would you like to pull this model now? (y/n): " pull_model
+      if [[ "$pull_model" =~ ^[Yy]$ ]]; then
+        echo "Pulling model $MODEL (this may take a while)..."
+        ollama pull "$MODEL"
       else
-        echo "No models are currently available in Ollama."
-        read -p "Would you like to pull the configured model ($MODEL) now? (y/n): " pull_model
-        if [[ "$pull_model" =~ ^[Yy]$ ]]; then
-          echo "Pulling model $MODEL (this may take a while)..."
-          ollama pull "$MODEL"
-        else
-          echo "You can pull the model later with: ollama pull $MODEL"
-          echo "Or change the model in /etc/paw/config.ini with: sudo paw-config"
-        fi
+        echo "You can pull the model later with: ollama pull $MODEL"
+        echo "Or change the model in /etc/paw/config.ini with: sudo paw-config"
       fi
     fi
   else
