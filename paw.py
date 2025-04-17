@@ -229,27 +229,23 @@ class PAW:
         try:
             logger.info(f"Sending prompt to LLM: {prompt[:50]}...")
             
-            # Use fancy spinner for thinking animation if rich is available
+            # Don't use fancy spinner for thinking animation to avoid display conflicts
             if RICH_AVAILABLE:
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[bold cyan]Thinking...[/]"),
-                    TimeElapsedColumn(),
-                    console=console,
-                    transient=True
-                ) as progress:
-                    task = progress.add_task("Thinking...", total=None)
-                    
-                    response = httpx.post(
-                        f"{OLLAMA_HOST}/api/generate",
-                        json={
-                            "model": MODEL,
-                            "prompt": prompt,
-                            "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Your job is to help users perform cybersecurity tasks by translating natural language requests into a sequence of commands. For each request, output a JSON object with the following structure: {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. The 'plan' should outline the steps to achieve the user's goal, 'commands' should list the actual Linux commands to execute (one per line), and 'explanation' should provide context for what each command does.",
-                            "stream": False,
-                        },
-                        timeout=LLM_TIMEOUT
-                    )
+                console.print("[bold cyan]Thinking...[/]", end="")
+                
+                response = httpx.post(
+                    f"{OLLAMA_HOST}/api/generate",
+                    json={
+                        "model": MODEL,
+                        "prompt": prompt,
+                        "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Your job is to help users perform cybersecurity tasks by translating natural language requests into a sequence of commands. For each request, output a JSON object with the following structure: {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. The 'plan' should outline the steps to achieve the user's goal, 'commands' should list the actual Linux commands to execute (one per line), and 'explanation' should provide context for what each command does.",
+                        "stream": False,
+                    },
+                    timeout=LLM_TIMEOUT
+                )
+                
+                # Clear the line
+                console.print("\r" + " " * 50 + "\r", end="")
             else:
                 print(f"\033[1;34m[*] Thinking...\033[0m (timeout: {LLM_TIMEOUT}s)")
                 response = httpx.post(
@@ -870,24 +866,33 @@ Respond with a JSON object containing:
 The command should directly use the values from the previous output when appropriate, not placeholders.
 """
         
-        response = self.generate_llm_response(context)
-        
-        if "error" in response:
-            return None, None
-        
-        # Extract the next command and explanation
-        next_command = response.get("command", "")
-        if isinstance(next_command, list) and next_command:
-            next_command = next_command[0]
-        
-        explanation = response.get("explanation", "")
-        if isinstance(explanation, list) and explanation:
-            explanation = explanation[0]
-
-        # Substitute any remaining placeholders
-        next_command = self.substitute_variables(next_command, variables)
+        try:
+            # Use direct call to generate response without using Progress
+            if RICH_AVAILABLE:
+                console.print("[bold cyan]Generating next command...[/]")
             
-        return next_command, explanation
+            response = self.generate_llm_response(context)
+            
+            if "error" in response:
+                logger.error(f"Error generating next command: {response['error']}")
+                return None, None
+            
+            # Extract the next command and explanation
+            next_command = response.get("command", "")
+            if isinstance(next_command, list) and next_command:
+                next_command = next_command[0]
+            
+            explanation = response.get("explanation", "")
+            if isinstance(explanation, list) and explanation:
+                explanation = explanation[0]
+
+            # Substitute any remaining placeholders
+            next_command = self.substitute_variables(next_command, variables)
+                
+            return next_command, explanation
+        except Exception as e:
+            logger.error(f"Error generating next command: {e}")
+            return None, None
     
     def interactive_command_selection(self, commands, explanations):
         """Allow user to selectively run commands one by one with y/n confirmation."""
@@ -964,12 +969,8 @@ The command should directly use the values from the previous output when appropr
     
     def process_request(self, request, adaptive_override=None):
         """Process a natural language request."""
-        # Override adaptive mode if specified
-        if adaptive_override is not None:
-            self.adaptive_mode = adaptive_override
-        else:
-            # Always use adaptive mode for the new one-by-one execution flow
-            self.adaptive_mode = True
+        # Always use adaptive mode for one-by-one command generation
+        self.adaptive_mode = True
             
         # Clean up the request
         request = request.strip()
@@ -984,10 +985,47 @@ The command should directly use the values from the previous output when appropr
         if interfaces:
             variables['network_interfaces'] = interfaces
             variables['interface'] = interfaces[0]  # Use first interface as default
+            
+            # Special handling for MAC address change operations
+            if "mac" in request.lower() and "change" in request.lower():
+                # Check if a specific interface was mentioned in the request
+                specified_interface = None
+                for iface in interfaces:
+                    if iface in request.lower():
+                        specified_interface = iface
+                        break
+                        
+                if specified_interface:
+                    variables['interface'] = specified_interface
+                else:
+                    # Show available interfaces to the user
+                    if RICH_AVAILABLE:
+                        console.print("[bold cyan]Available network interfaces:[/]")
+                        for i, iface in enumerate(interfaces):
+                            console.print(f"  [bold]{i+1}.[/] {iface}")
+                        
+                        choice = Prompt.ask(
+                            "[bold yellow]Select interface for MAC address change[/]", 
+                            choices=[str(i+1) for i in range(len(interfaces))], 
+                            default="1"
+                        )
+                        variables['interface'] = interfaces[int(choice)-1]
+                    else:
+                        print("\033[1;36m[*] Available network interfaces:\033[0m")
+                        for i, iface in enumerate(interfaces):
+                            print(f"  {i+1}. {iface}")
+                        
+                        choice = input("\033[1;35m[?] Select interface for MAC address change [1]: \033[0m").strip()
+                        if not choice:
+                            choice = "1"
+                        variables['interface'] = interfaces[int(choice)-1]
+                        
+                    # Update the request to include the selected interface
+                    request = f"{request} on {variables['interface']}"
         
-        # Generate LLM response
+        # Generate initial context for the first command
         context = f"""
-As PAW (Prompt Assisted Workflow), analyze this cybersecurity request and provide a plan of action:
+As PAW (Prompt Assisted Workflow), analyze this cybersecurity request and provide a plan and the FIRST command to execute:
 
 REQUEST: {request}
 
@@ -1043,12 +1081,22 @@ Consider the following Kali Linux tools and their key options when appropriate:
    - enum4linux: -a (all enumeration), -u (user), -p (pass)
    - msfvenom: -p (payload), -f (format), -e (encoder)
 
-Design your commands to work sequentially as a workflow, where later commands build on the results of earlier ones.
-For commands that need input from previous commands, use placeholders like <target_ip> or <discovered_hosts>.
-Provide the specific commands that would accomplish this task, explaining what each command does.
+INSTRUCTIONS:
+1. First, outline a high-level plan of action in 2-4 bullet points.
+2. ONLY provide the FIRST command to execute. Do not list all commands at once.
+3. Explain what this first command does.
+
+Respond with a JSON object containing:
+{{
+  "plan": ["step 1", "step 2", ...],
+  "commands": ["FIRST_COMMAND_ONLY"],
+  "explanation": ["Explanation of the first command"]
+}}
+
+Available variables detected: {json.dumps(variables, indent=2)}
 """
         
-        response = self.generate_llm_response(context + request)
+        response = self.generate_llm_response(context)
         
         if "error" in response:
             if RICH_AVAILABLE:
@@ -1061,7 +1109,7 @@ Provide the specific commands that would accomplish this task, explaining what e
         plan = response.get("plan", [])
         self.display_plan(plan)
         
-        # Get commands and explanations
+        # Get the first command and explanation
         commands = response.get("commands", [])
         explanations = response.get("explanation", [""] * len(commands))
         
@@ -1072,23 +1120,17 @@ Provide the specific commands that would accomplish this task, explaining what e
                 print("\033[1;33m[!] No commands were generated for this request.\033[0m")
             return
         
+        # Only take the first command
+        cmd = commands[0] if commands else ""
+        explanation = explanations[0] if explanations else ""
+        
         # Execute commands one by one
-        variables = {}  # Store variables for command chaining
         command_index = 0
-        total_commands = len(commands)
+        total_commands = 1  # Only counting the current command
+        prev_output = ""
+        prev_command = ""
         
-        # Pre-populate with network interface information before starting
-        local_ip = self.get_local_ip()
-        variables['your_ip'] = local_ip
-        variables['local_ip'] = local_ip
-        
-        # Add network interfaces
-        interfaces = self.get_network_interfaces()
-        if interfaces:
-            variables['network_interfaces'] = interfaces
-            variables['interface'] = interfaces[0]  # Use first interface as default
-        
-        for cmd, explanation in zip(commands, explanations):
+        while cmd:
             command_index += 1
             
             # Clean up the command (remove comments and whitespace)
@@ -1101,13 +1143,14 @@ Provide the specific commands that would accomplish this task, explaining what e
             execute = self.display_single_command(cmd, explanation, command_index, total_commands)
             
             if not execute:
-                continue
+                break
             
             # Execute command
             result = self.execute_command(cmd, variables)
             
             # Store output for potential use in next commands
             prev_output = result["stdout"] + result["stderr"]
+            prev_command = cmd
             
             # Display result
             success = self.display_result(result, command_index, total_commands)
@@ -1130,35 +1173,32 @@ Provide the specific commands that would accomplish this task, explaining what e
                     continue_workflow = continue_workflow == "" or continue_workflow == "y"
                 
                 if continue_workflow:
-                    if RICH_AVAILABLE:
-                        with Progress(
-                            SpinnerColumn(),
-                            TextColumn("[bold cyan]Generating next command...[/]"),
-                            console=console,
-                            transient=True
-                        ) as progress:
-                            task = progress.add_task("Thinking...", total=None)
-                            next_cmd, next_explanation = self.generate_next_command(
-                                request, result["command"], prev_output, variables
-                            )
-                    else:
-                        print("\n\033[1;34m[*] Generating next command...\033[0m")
-                        next_cmd, next_explanation = self.generate_next_command(
-                            request, result["command"], prev_output, variables
-                        )
+                    # Generate next command without using Progress
+                    next_cmd, next_explanation = self.generate_next_command(
+                        request, prev_command, prev_output, variables
+                    )
                     
                     if next_cmd:
-                        commands.append(next_cmd)
-                        explanations.append(next_explanation)
-                        total_commands += 1
+                        cmd = next_cmd
+                        explanation = next_explanation
+                        total_commands += 1  # Increment total for display purposes
+                    else:
+                        if RICH_AVAILABLE:
+                            console.print("[bold yellow]Could not generate the next command. The workflow is complete.[/]")
+                        else:
+                            print("\033[1;33m[*] Could not generate the next command. The workflow is complete.\033[0m")
+                        break
                 else:
                     # User chose not to continue
                     break
+            else:
+                # Command failed and couldn't be fixed
+                break
         
         # Final summary
         if RICH_AVAILABLE:
             console.print(Panel("[bold green]Workflow completed[/]", 
-                               border_style=self.theme['success']))
+                             border_style=self.theme['success']))
         else:
             print("\n\033[1;32m[+] Workflow completed\033[0m")
 
