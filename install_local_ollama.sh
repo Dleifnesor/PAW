@@ -31,13 +31,22 @@ else
     exit 1
 fi
 
-# Download Ollama
+# Download Ollama - fixed URL and added error checking
 echo "Downloading Ollama..."
-curl -L "https://ollama.com/download/${OLLAMA_PACKAGE}.tar.gz" -o "${OLLAMA_DIR}/${OLLAMA_PACKAGE}.tar.gz"
+DOWNLOAD_URL="https://github.com/ollama/ollama/releases/latest/download/${OLLAMA_PACKAGE}"
+if ! curl -L "${DOWNLOAD_URL}" -o "${OLLAMA_BIN}/ollama"; then
+    echo "Error: Failed to download Ollama from ${DOWNLOAD_URL}"
+    exit 1
+fi
 
-# Extract Ollama
-echo "Extracting Ollama..."
-tar -xzf "${OLLAMA_DIR}/${OLLAMA_PACKAGE}.tar.gz" -C "${OLLAMA_BIN}"
+# Make the binary executable
+chmod +x "${OLLAMA_BIN}/ollama"
+if [ ! -x "${OLLAMA_BIN}/ollama" ]; then
+    echo "Error: Failed to make Ollama executable"
+    exit 1
+fi
+
+echo "Ollama binary downloaded successfully"
 
 # Create wrapper script with environment variables
 cat > "${OLLAMA_DIR}/run_ollama.sh" << 'EOF'
@@ -103,6 +112,12 @@ python3 "\${CURRENT_DIR}/paw.py" "\$@"
 EOF
 
 chmod +x "${CURRENT_DIR}/run_paw.sh"
+
+# Verify installation
+if [ ! -f "${OLLAMA_BIN}/ollama" ]; then
+    echo "Error: Ollama installation failed. Binary not found."
+    exit 1
+fi
 
 # Check if pull_model.sh exists and make it executable
 if [ -f "${CURRENT_DIR}/pull_model.sh" ]; then
