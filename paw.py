@@ -189,6 +189,41 @@ class PAW:
         # Get config for adaptive mode
         self.adaptive_mode = config['DEFAULT'].getboolean('adaptive_mode', False)
     
+    def get_network_interfaces(self):
+        """Get a list of all available network interfaces on the system."""
+        interfaces = []
+        try:
+            # Try to use the 'ip' command first (more modern)
+            process = subprocess.run(['ip', 'addr', 'show'], capture_output=True, text=True)
+            if process.returncode == 0:
+                # Parse output to extract interface names
+                output = process.stdout
+                for line in output.split('\n'):
+                    if ': ' in line and not line.startswith(' '):
+                        interface = line.split(': ')[1].split(':')[0]
+                        interfaces.append(interface)
+            else:
+                # Fallback to ifconfig
+                process = subprocess.run(['ifconfig', '-a'], capture_output=True, text=True)
+                if process.returncode == 0:
+                    output = process.stdout
+                    for line in output.split('\n'):
+                        if line and not line.startswith(' ') and not line.startswith('\t'):
+                            interface = line.split(':')[0].split()[0]
+                            if interface:
+                                interfaces.append(interface)
+        except Exception as e:
+            logger.error(f"Error detecting network interfaces: {e}")
+            # Add common interface names as fallback
+            interfaces = ['eth0', 'wlan0', 'enp0s3', 'lo', 'wlp0s20f3']
+        
+        # Remove loopback from being the primary interface
+        if 'lo' in interfaces:
+            interfaces.remove('lo')
+            interfaces.append('lo')  # Add it back at the end
+            
+        return interfaces
+    
     def generate_llm_response(self, prompt):
         """Generate a response from the LLM using Ollama."""
         try:
@@ -347,6 +382,44 @@ class PAW:
         """Attempt to fix a failed command based on error message."""
         fixed_command = command
         suggestion = None
+        ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
+        
+        # Handle missing interface error
+        if "cannot open interface" in stderr or "No such device" in stderr:
+            # This is likely an issue with a network interface placeholder
+            interfaces = self.get_network_interfaces()
+            suggestion = f"Available network interfaces: {', '.join(interfaces)}"
+            
+            if interfaces:
+                # Try to replace the interface in the command
+                for placeholder in ["<interface>", "eth0", "wlan0"]:
+                    if placeholder in command:
+                        fixed_command = command.replace(placeholder, interfaces[0])
+                        variables['interface'] = interfaces[0]
+                        return fixed_command, suggestion, variables
+                
+                # If no placeholder was found but we have interfaces, prompt the user
+                if RICH_AVAILABLE:
+                    selected_interface = Prompt.ask(
+                        "[bold yellow]Enter interface name[/]", 
+                        choices=interfaces, 
+                        default=interfaces[0]
+                    )
+                else:
+                    print(f"\033[1;33m[*] Available interfaces: {', '.join(interfaces)}\033[0m")
+                    selected_interface = input(f"Enter interface name [{interfaces[0]}]: ").strip()
+                    if not selected_interface:
+                        selected_interface = interfaces[0]
+                
+                variables['interface'] = selected_interface
+                
+                # Try to find the interface name in the command
+                interface_pattern = r'\b([a-zA-Z0-9]+)\b'
+                # Replace the first occurrence of what looks like an interface name
+                interface_match = re.search(interface_pattern, command)
+                if interface_match:
+                    fixed_command = command.replace(interface_match.group(0), selected_interface)
+                return fixed_command, suggestion, variables
         
         # Common error patterns and fixes
         if "No such file" in stderr or "not found" in stderr:
@@ -672,14 +745,42 @@ class PAW:
                 padding=(1, 1)
             ))
             
-            run_cmd = Prompt.ask("Execute this command?", choices=["y", "n"], default="y")
-            return run_cmd == "y"
+            # Use a single prompt and return directly
+            return Confirm.ask("Execute this command?", default=True)
         else:
             print(f"\n  \033[1;33m[{command_index}/{total_commands}] Command:\033[0m {command}")
             print(f"      \033[1;32mExplanation:\033[0m {explanation}")
             
+            # Use a single prompt and return directly
             run_cmd = input("\033[1;35m[?] Execute this command? [y/n] (y): \033[0m").strip().lower()
             return run_cmd == "" or run_cmd == "y"
+    
+    def handle_failed_command(self, cmd, result, variables, command_index, total_commands):
+        """Handle a failed command by trying to fix it or asking user what to do."""
+        # Try to fix the command
+        fixed_cmd, suggestion, updated_vars = self.fix_failed_command(cmd, result["stderr"], variables)
+        
+        if fixed_cmd != cmd:
+            if suggestion:
+                if RICH_AVAILABLE:
+                    console.print(f"[bold yellow]Suggestion:[/] {suggestion}")
+                else:
+                    print(f"\033[1;33m[*] Suggestion:\033[0m {suggestion}")
+                    
+            if RICH_AVAILABLE:
+                console.print(f"[bold yellow]Suggested fix:[/] {fixed_cmd}")
+                retry = Confirm.ask("Try the fixed command?", default=True)
+            else:
+                print(f"\033[1;33m[*] Suggested fix:\033[0m {fixed_cmd}")
+                retry = input("\033[1;35m[?] Try the fixed command? (y/n): \033[0m").strip().lower()
+                retry = retry == "" or retry == "y"
+                
+            if retry:
+                result = self.execute_command(fixed_cmd, updated_vars)
+                self.display_result(result, command_index, total_commands)
+                return result, updated_vars
+                
+        return result, variables
     
     def display_result(self, result, command_index, total_commands):
         """Display command execution result with fancy formatting."""
@@ -698,6 +799,7 @@ class PAW:
             # Add command output
             if result["stdout"].strip():
                 content.append("\n[bold]Output:[/]")
+                
                 # Limit output length to prevent huge displays
                 stdout = result["stdout"].strip()
                 if len(stdout) > 2000:  # Limit to 2000 chars
@@ -721,8 +823,6 @@ class PAW:
                 expand=False
             ))
         else:
-            print(f"\n\033[1;33m[{command_index}/{total_commands}] Executing:\033[0m {cmd}")
-            
             # Print result
             if result["exit_code"] == 0:
                 print("\033[1;32m[+] Command completed successfully\033[0m")
@@ -735,6 +835,8 @@ class PAW:
             if result["stderr"]:
                 print("\033[1;31m[*] Error output:\033[0m")
                 print(result["stderr"])
+                
+        return result["exit_code"] == 0
     
     def generate_next_command(self, request, previous_command, previous_output, variables):
         """Generate the next command based on the output of the previous command."""
@@ -870,7 +972,18 @@ The command should directly use the values from the previous output when appropr
             self.adaptive_mode = True
             
         # Clean up the request
-        request = request.replace('\r', '').strip()
+        request = request.strip()
+        
+        # Get initial variables
+        variables = {
+            'local_ip': self.get_local_ip()
+        }
+        
+        # Add network interfaces
+        interfaces = self.get_network_interfaces()
+        if interfaces:
+            variables['network_interfaces'] = interfaces
+            variables['interface'] = interfaces[0]  # Use first interface as default
         
         # Generate LLM response
         context = f"""
@@ -964,6 +1077,17 @@ Provide the specific commands that would accomplish this task, explaining what e
         command_index = 0
         total_commands = len(commands)
         
+        # Pre-populate with network interface information before starting
+        local_ip = self.get_local_ip()
+        variables['your_ip'] = local_ip
+        variables['local_ip'] = local_ip
+        
+        # Add network interfaces
+        interfaces = self.get_network_interfaces()
+        if interfaces:
+            variables['network_interfaces'] = interfaces
+            variables['interface'] = interfaces[0]  # Use first interface as default
+        
         for cmd, explanation in zip(commands, explanations):
             command_index += 1
             
@@ -973,18 +1097,8 @@ Provide the specific commands that would accomplish this task, explaining what e
             # Substitute variables
             cmd = self.substitute_variables(cmd, variables)
             
-            # Display command
-            if RICH_AVAILABLE:
-                self.display_single_command(cmd, explanation, command_index, total_commands)
-            else:
-                print(f"\n\033[1;33m[{command_index}/{total_commands}] Executing:\033[0m {cmd}")
-                print(f"\033[1;36m[*] Explanation:\033[0m {explanation}")
-            
-            # Ask for confirmation
-            if RICH_AVAILABLE:
-                execute = Confirm.ask("Execute this command?", default=True)
-            else:
-                execute = input("\033[1;35m[?] Execute this command? (y/n): \033[0m").lower() == 'y'
+            # Display command and get confirmation in a single step
+            execute = self.display_single_command(cmd, explanation, command_index, total_commands)
             
             if not execute:
                 continue
@@ -996,56 +1110,50 @@ Provide the specific commands that would accomplish this task, explaining what e
             prev_output = result["stdout"] + result["stderr"]
             
             # Display result
-            self.display_result(result, command_index, total_commands)
+            success = self.display_result(result, command_index, total_commands)
             
             # If command failed, try to fix it
-            if result["exit_code"] != 0:
-                fixed_cmd, suggestion, updated_vars = self.fix_failed_command(cmd, result["stderr"], variables)
-                if fixed_cmd != cmd:
-                    if RICH_AVAILABLE:
-                        console.print(f"[bold yellow]Suggested fix:[/] {fixed_cmd}")
-                        retry = Confirm.ask("Try the fixed command?", default=True)
-                    else:
-                        print(f"\033[1;33m[*] Suggested fix:\033[0m {fixed_cmd}")
-                        retry = input("\033[1;35m[?] Try the fixed command? (y/n): \033[0m").lower() == 'y'
-                    
-                    if retry:
-                        result = self.execute_command(fixed_cmd, updated_vars)
-                        self.display_result(result, command_index, total_commands)
+            if not success:
+                result, variables = self.handle_failed_command(cmd, result, variables, command_index, total_commands)
+                prev_output = result["stdout"] + result["stderr"]
+                success = (result["exit_code"] == 0)
             
-            # Ask if user wants to continue
-            if RICH_AVAILABLE:
-                console.print("\n[bold cyan]Command completed successfully[/]")
-                continue_workflow = Confirm.ask("Generate next command based on this output?", default=True)
-            else:
-                print("\n\033[1;36m[*] Command completed successfully\033[0m")
-                continue_workflow = input("\n\033[1;35m[?] Generate next command based on this output? (y/n): \033[0m").lower() == 'y'
-            
-            if continue_workflow:
+            # Only continue if the command was successful
+            if success:
+                # Ask if user wants to continue
                 if RICH_AVAILABLE:
-                    with Progress(
-                        SpinnerColumn(),
-                        TextColumn("[bold cyan]Generating next command...[/]"),
-                        console=console,
-                        transient=True
-                    ) as progress:
-                        task = progress.add_task("Thinking...", total=None)
+                    console.print("\nCommand completed successfully")
+                    continue_workflow = Confirm.ask("Generate next command based on this output?", default=True)
+                else:
+                    print("\n\033[1;36m[*] Command completed successfully\033[0m")
+                    continue_workflow = input("\033[1;35m[?] Generate next command based on this output? (y/n): \033[0m").strip().lower()
+                    continue_workflow = continue_workflow == "" or continue_workflow == "y"
+                
+                if continue_workflow:
+                    if RICH_AVAILABLE:
+                        with Progress(
+                            SpinnerColumn(),
+                            TextColumn("[bold cyan]Generating next command...[/]"),
+                            console=console,
+                            transient=True
+                        ) as progress:
+                            task = progress.add_task("Thinking...", total=None)
+                            next_cmd, next_explanation = self.generate_next_command(
+                                request, result["command"], prev_output, variables
+                            )
+                    else:
+                        print("\n\033[1;34m[*] Generating next command...\033[0m")
                         next_cmd, next_explanation = self.generate_next_command(
                             request, result["command"], prev_output, variables
                         )
+                    
+                    if next_cmd:
+                        commands.append(next_cmd)
+                        explanations.append(next_explanation)
+                        total_commands += 1
                 else:
-                    print("\n\033[1;34m[*] Generating next command...\033[0m")
-                    next_cmd, next_explanation = self.generate_next_command(
-                        request, result["command"], prev_output, variables
-                    )
-                
-                if next_cmd:
-                    commands.append(next_cmd)
-                    explanations.append(next_explanation)
-                    total_commands += 1
-            else:
-                # User chose not to continue
-                break
+                    # User chose not to continue
+                    break
         
         # Final summary
         if RICH_AVAILABLE:
