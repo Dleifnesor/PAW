@@ -10,12 +10,19 @@ import os
 import sys
 from typing import Dict, List, Any, Optional
 
+# Add the current directory to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+
 # Try to import the PAW tools registry module
 try:
     from tools_registry import get_tools_registry, register_tool
 except ImportError:
     print("Error: Could not import PAW tools_registry module.")
-    print("Make sure PAW is installed correctly and this script is in the correct directory.")
+    print("Current Python path:")
+    for path in sys.path:
+        print(f"  - {path}")
+    print("\nMake sure PAW is installed correctly and this script is in the correct directory.")
     print("You can install PAW by running: bash install.sh")
     sys.exit(1)
 

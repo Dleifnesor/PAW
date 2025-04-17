@@ -186,10 +186,42 @@ chmod 644 "$CONFIG_DIR/config.ini"
 chmod -R 777 "$LOG_DIR"  # Allow all users to write logs
 chmod -R 755 "$DOC_DIR"
 
+# Check if Kali Linux is detected
+if [ -f "/etc/os-release" ] && grep -q "Kali" /etc/os-release; then
+  echo "Kali Linux detected. Setting up Kali tools integration..."
+  
+  # Check for required Kali tools
+  echo "Checking for required Kali tools..."
+  REQUIRED_TOOLS=("nmap" "hydra" "sqlmap" "metasploit-framework" "aircrack-ng" "john" "hashcat")
+  MISSING_TOOLS=()
+  
+  for tool in "${REQUIRED_TOOLS[@]}"; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      MISSING_TOOLS+=("$tool")
+    fi
+  done
+  
+  if [ ${#MISSING_TOOLS[@]} -ne 0 ]; then
+    echo "Some recommended Kali tools are not installed: ${MISSING_TOOLS[*]}"
+    read -p "Would you like to install these tools? (y/n): " install_tools
+    if [[ "$install_tools" =~ ^[Yy]$ ]]; then
+      echo "Installing recommended Kali tools..."
+      apt-get update
+      apt-get install -y "${MISSING_TOOLS[@]}"
+    fi
+  fi
+fi
+
 # Run extensive_kali_tools.py to populate the tool registry
 if [ -f "$INSTALL_DIR/extensive_kali_tools.py" ]; then
   echo "Populating Kali Linux tools registry..."
-  python3 "$INSTALL_DIR/extensive_kali_tools.py" || echo "Warning: Failed to populate Kali tools registry. You can run 'paw-kali-tools' manually after installation."
+  if python3 "$INSTALL_DIR/extensive_kali_tools.py"; then
+    echo "Kali tools registry populated successfully."
+  else
+    echo "Warning: Failed to populate Kali tools registry. You can run 'paw-kali-tools' manually after installation."
+    echo "Error details:"
+    python3 "$INSTALL_DIR/extensive_kali_tools.py" 2>&1
+  fi
 else
   echo "Note: extensive_kali_tools.py not found. Kali tools functionality will be limited."
   echo "You can manually add Kali tools later using 'paw-kali-tools' if you install the file."
@@ -276,6 +308,16 @@ if command -v ollama >/dev/null 2>&1; then
 else
   echo "WARNING: Ollama is not installed. PAW requires Ollama to function."
   echo "Visit https://ollama.ai/download for installation instructions."
+fi
+
+# Add Kali tools configuration if it doesn't exist
+if ! grep -q "^\[KALI_TOOLS\]" "$CONFIG_DIR/config.ini"; then
+  echo "
+[KALI_TOOLS]
+enabled = true
+auto_update = true
+categories = Information Gathering,Vulnerability Analysis,Web Application Analysis,Database Assessment,Password Attacks,Wireless Attacks,Bluetooth Attacks,Reverse Engineering,Exploitation Tools,Sniffing & Spoofing,Post Exploitation,Forensics,Reporting Tools,Social Engineering Tools,System Services,Cryptography,Hardware Hacking" >> "$CONFIG_DIR/config.ini"
+  echo "Added Kali tools configuration"
 fi
 
 echo ""

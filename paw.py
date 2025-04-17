@@ -1000,7 +1000,7 @@ Provide the specific commands that would accomplish this task, explaining what e
             
             # If command failed, try to fix it
             if result["exit_code"] != 0:
-                fixed_cmd = self.fix_failed_command(cmd, result["stderr"], variables)
+                fixed_cmd, suggestion, updated_vars = self.fix_failed_command(cmd, result["stderr"], variables)
                 if fixed_cmd != cmd:
                     if RICH_AVAILABLE:
                         console.print(f"[bold yellow]Suggested fix:[/] {fixed_cmd}")
@@ -1010,7 +1010,7 @@ Provide the specific commands that would accomplish this task, explaining what e
                         retry = input("\033[1;35m[?] Try the fixed command? (y/n): \033[0m").lower() == 'y'
                     
                     if retry:
-                        result = self.execute_command(fixed_cmd, variables)
+                        result = self.execute_command(fixed_cmd, updated_vars)
                         self.display_result(result, command_index, total_commands)
             
             # Ask if user wants to continue
