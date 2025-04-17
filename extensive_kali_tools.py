@@ -939,6 +939,575 @@ KALI_TOOLS.extend([
         ]
     }
 ])
+# Additional Kali Linux Tools to add to the existing collection
+ 
+ # Network Reconnaissance
+KALI_TOOLS.extend([
+     {
+         "name": "fierce",
+         "category": "Information Gathering",
+         "description": "Domain DNS scanner that can locate non-contiguous IP space and hostnames against specified domains",
+         "common_usage": "fierce --domain {domain}",
+         "examples": [
+             {"description": "Basic scan", "command": "fierce --domain example.com"},
+             {"description": "Use custom wordlist", "command": "fierce --domain example.com --wordlist /path/to/wordlist.txt"},
+             {"description": "Specify DNS server", "command": "fierce --domain example.com --dns-servers 8.8.8.8"}
+         ]
+     },
+     {
+         "name": "masscan",
+         "category": "Information Gathering",
+         "description": "TCP port scanner, similar to nmap but much faster for Internet-scale network scanning",
+         "common_usage": "masscan {target} -p{ports}",
+         "examples": [
+             {"description": "Basic scan", "command": "masscan 192.168.1.0/24 -p80,443"},
+             {"description": "Scan range of ports", "command": "masscan 192.168.1.0/24 -p1-65535"},
+             {"description": "Maximum rate", "command": "masscan 192.168.1.0/24 -p1-65535 --rate=10000"},
+             {"description": "Output to file", "command": "masscan 192.168.1.0/24 -p1-65535 -oX results.xml"}
+         ]
+     },
+     {
+         "name": "dnsenum",
+         "category": "Information Gathering",
+         "description": "Multithreaded DNS enumeration and network mapping tool",
+         "common_usage": "dnsenum {domain}",
+         "examples": [
+             {"description": "Basic enumeration", "command": "dnsenum example.com"},
+             {"description": "Brute force", "command": "dnsenum --enum -p 10 -s 100 -f /path/to/wordlist.txt example.com"}
+         ]
+     },
+     {
+         "name": "enum4linux",
+         "category": "Information Gathering",
+         "description": "Tool for enumerating information from Windows and Samba systems",
+         "common_usage": "enum4linux [options] {target}",
+         "examples": [
+             {"description": "Full enumeration", "command": "enum4linux -a 192.168.1.10"},
+             {"description": "User enumeration", "command": "enum4linux -U 192.168.1.10"},
+             {"description": "Password policy", "command": "enum4linux -P 192.168.1.10"}
+         ]
+     }
+ ])
+ 
+ # Web Application Security
+KALI_TOOLS.extend([
+     {
+         "name": "skipfish",
+         "category": "Web Application Analysis",
+         "description": "Fully automated, active web application security reconnaissance tool",
+         "common_usage": "skipfish -o {output_dir} -S {wordlist} {target}",
+         "examples": [
+             {"description": "Basic scan", "command": "skipfish -o output_dir -S /usr/share/skipfish/dictionaries/complete.wl http://example.com"},
+             {"description": "Authentication", "command": "skipfish -o output_dir -A username:password http://example.com"}
+         ]
+     },
+     {
+         "name": "wafw00f",
+         "category": "Web Application Analysis",
+         "description": "Web Application Firewall (WAF) fingerprinting tool",
+         "common_usage": "wafw00f {url}",
+         "examples": [
+             {"description": "Detect WAF", "command": "wafw00f http://example.com"},
+             {"description": "Detect WAF with verbosity", "command": "wafw00f -v http://example.com"}
+         ]
+     },
+     {
+         "name": "commix",
+         "category": "Web Application Analysis",
+         "description": "Automated Command Injection exploitation tool",
+         "common_usage": "commix --url {url} [options]",
+         "examples": [
+             {"description": "Basic scan", "command": "commix --url=\"http://example.com/vulnerable.php?id=1\""},
+             {"description": "Using POST data", "command": "commix --url=\"http://example.com/vulnerable.php\" --data=\"id=1\""},
+             {"description": "Cookie authentication", "command": "commix --url=\"http://example.com/vulnerable.php\" --cookie=\"PHPSESSID=r4nd0m\""}
+         ]
+     },
+     {
+         "name": "nuclei",
+         "category": "Web Application Analysis",
+         "description": "Fast and customizable vulnerability scanner based on templates",
+         "common_usage": "nuclei -u {url} [options]",
+         "examples": [
+             {"description": "Basic scan", "command": "nuclei -u http://example.com"},
+             {"description": "Use templates", "command": "nuclei -u http://example.com -t cves/"},
+             {"description": "Scan multiple targets", "command": "nuclei -l targets.txt"},
+             {"description": "Severity-based scan", "command": "nuclei -u http://example.com -severity critical,high"}
+         ]
+     }
+ ])
+ 
+ # Wireless Security
+KALI_TOOLS.extend([
+     {
+         "name": "kismet",
+         "category": "Wireless Attacks",
+         "description": "Wireless network detector, sniffer, and IDS",
+         "common_usage": "kismet -c {interface}",
+         "examples": [
+             {"description": "Basic monitoring", "command": "kismet -c wlan0mon"},
+             {"description": "Output to file", "command": "kismet -c wlan0mon -o output.pcapng"}
+         ]
+     },
+     {
+         "name": "fern-wifi-cracker",
+         "category": "Wireless Attacks",
+         "description": "Wireless security auditing and attack tool",
+         "common_usage": "fern-wifi-cracker",
+         "examples": [
+             {"description": "Start GUI", "command": "fern-wifi-cracker"}
+         ]
+     },
+     {
+         "name": "mdk4",
+         "category": "Wireless Attacks",
+         "description": "Wi-Fi testing tool for attacking networks",
+         "common_usage": "mdk4 {interface} {attack_mode} [options]",
+         "examples": [
+             {"description": "Beacon flood", "command": "mdk4 wlan0mon b -c 1"},
+             {"description": "Deauthentication", "command": "mdk4 wlan0mon d -B 00:11:22:33:44:55"}
+         ]
+     },
+     {
+         "name": "bully",
+         "category": "Wireless Attacks",
+         "description": "WPS brute force attack implementation",
+         "common_usage": "bully {interface} -b {BSSID} [options]",
+         "examples": [
+             {"description": "Basic attack", "command": "bully wlan0mon -b 00:11:22:33:44:55 -c 6"},
+             {"description": "With PIN", "command": "bully wlan0mon -b 00:11:22:33:44:55 -c 6 -p 12345670"}
+         ]
+     }
+ ])
+ 
+ # Exploitation Frameworks
+KALI_TOOLS.extend([
+     {
+         "name": "exploit-db",
+         "category": "Exploitation Tools",
+         "description": "Archive of public exploits and corresponding vulnerable software",
+         "common_usage": "searchsploit [options] {search_term}",
+         "examples": [
+             {"description": "Search exploits", "command": "searchsploit apache struts"},
+             {"description": "Search by CVE", "command": "searchsploit CVE-2021-44228"}
+         ]
+     },
+     {
+         "name": "beef-xss",
+         "category": "Exploitation Tools",
+         "description": "Browser Exploitation Framework for XSS attacks",
+         "common_usage": "beef-xss",
+         "examples": [
+             {"description": "Start framework", "command": "beef-xss"},
+             {"description": "Custom config", "command": "beef-xss -c config.yaml"}
+         ]
+     },
+     {
+         "name": "routersploit",
+         "category": "Exploitation Tools",
+         "description": "Exploitation framework for embedded devices",
+         "common_usage": "rsf",
+         "examples": [
+             {"description": "Start framework", "command": "rsf"},
+             {"description": "Use module", "command": "use scanners/router_scan"}
+         ]
+     }
+ ])
+ 
+ # Password Attacks
+KALI_TOOLS.extend([
+     {
+         "name": "ophcrack",
+         "category": "Password Attacks",
+         "description": "Windows password cracker using rainbow tables",
+         "common_usage": "ophcrack [options]",
+         "examples": [
+             {"description": "Start GUI", "command": "ophcrack"},
+             {"description": "Load tables", "command": "ophcrack -d /path/to/tables -t vista_free"}
+         ]
+     },
+     {
+         "name": "cewl",
+         "category": "Password Attacks",
+         "description": "Custom word list generator from web content",
+         "common_usage": "cewl [options] {url}",
+         "examples": [
+             {"description": "Basic wordlist", "command": "cewl http://example.com -m 6 -w wordlist.txt"},
+             {"description": "With email extraction", "command": "cewl http://example.com -m 6 -w wordlist.txt --email"}
+         ]
+     },
+     {
+         "name": "crunch",
+         "category": "Password Attacks",
+         "description": "Wordlist generator that creates permutations",
+         "common_usage": "crunch {min} {max} [charset] [options]",
+         "examples": [
+             {"description": "Basic generation", "command": "crunch 8 8 -o wordlist.txt"},
+             {"description": "Custom charset", "command": "crunch 8 8 abcdefgh12345 -o wordlist.txt"},
+             {"description": "Pattern-based", "command": "crunch 8 8 -t password@ -o wordlist.txt"}
+         ]
+     },
+     {
+         "name": "medusa",
+         "category": "Password Attacks",
+         "description": "Parallel network login auditor",
+         "common_usage": "medusa -h {host} -u {user} -p {password} -M {module}",
+         "examples": [
+             {"description": "SSH brute force", "command": "medusa -h 192.168.1.1 -u admin -P /path/to/passwords.txt -M ssh"},
+             {"description": "FTP brute force", "command": "medusa -h 192.168.1.1 -U /path/to/users.txt -P /path/to/passwords.txt -M ftp"}
+         ]
+     }
+ ])
+ 
+ # Forensic Tools
+KALI_TOOLS.extend([
+     {
+         "name": "ddrescue",
+         "category": "Forensics",
+         "description": "Data recovery tool that copies data from one file/block device to another",
+         "common_usage": "ddrescue [options] {input} {output} [logfile]",
+         "examples": [
+             {"description": "Basic recovery", "command": "ddrescue /dev/sdb1 /dev/sdc1 logfile"},
+             {"description": "With retry", "command": "ddrescue -r3 /dev/sdb1 /dev/sdc1 logfile"}
+         ]
+     },
+     {
+         "name": "exiftool",
+         "category": "Forensics",
+         "description": "Tool for reading, writing, and manipulating metadata in files",
+         "common_usage": "exiftool [options] {files}",
+         "examples": [
+             {"description": "Read metadata", "command": "exiftool image.jpg"},
+             {"description": "Remove all metadata", "command": "exiftool -all= image.jpg"}
+         ]
+     },
+     {
+         "name": "scalpel",
+         "category": "Forensics",
+         "description": "File carving and recovery tool",
+         "common_usage": "scalpel {image} -o {output_dir}",
+         "examples": [
+             {"description": "Recover files", "command": "scalpel disk.img -o recovered"}
+         ]
+     },
+     {
+         "name": "bulk_extractor",
+         "category": "Forensics",
+         "description": "Tool that extracts information without parsing the file system",
+         "common_usage": "bulk_extractor -o {output_dir} {input}",
+         "examples": [
+             {"description": "Extract data", "command": "bulk_extractor -o output disk.img"},
+             {"description": "Focus on emails", "command": "bulk_extractor -e email -o output disk.img"}
+         ]
+     }
+ ])
+ 
+ # Social Engineering
+KALI_TOOLS.extend([
+     {
+         "name": "social-engineer-toolkit",
+         "category": "Social Engineering Tools",
+         "description": "Framework designed for social engineering attacks",
+         "common_usage": "setoolkit",
+         "examples": [
+             {"description": "Start toolkit", "command": "setoolkit"},
+             {"description": "Spear phishing", "command": "setoolkit > Social-Engineering Attacks > Spear-Phishing Attack Vectors"}
+         ]
+     },
+     {
+         "name": "gophish",
+         "category": "Social Engineering Tools",
+         "description": "Open-source phishing framework",
+         "common_usage": "gophish",
+         "examples": [
+             {"description": "Start service", "command": "gophish"}
+         ]
+     }
+ ])
+ 
+ # Network Security
+KALI_TOOLS.extend([
+     {
+         "name": "macchanger",
+         "category": "Sniffing & Spoofing",
+         "description": "Utility for manipulating MAC addresses",
+         "common_usage": "macchanger [options] {interface}",
+         "examples": [
+             {"description": "Show current MAC", "command": "macchanger -s eth0"},
+             {"description": "Random MAC", "command": "macchanger -r eth0"},
+             {"description": "Specific MAC", "command": "macchanger -m 00:11:22:33:44:55 eth0"}
+         ]
+     },
+     {
+         "name": "netcat",
+         "category": "Sniffing & Spoofing",
+         "description": "Networking utility for reading and writing to network connections",
+         "common_usage": "nc [options] {host} {port}",
+         "examples": [
+             {"description": "Listen for connections", "command": "nc -lvp 4444"},
+             {"description": "Connect to server", "command": "nc 192.168.1.1 80"},
+             {"description": "File transfer (receiver)", "command": "nc -lvp 4444 > received_file"},
+             {"description": "File transfer (sender)", "command": "nc 192.168.1.1 4444 < file_to_send"}
+         ]
+     },
+     {
+         "name": "arpspoof",
+         "category": "Sniffing & Spoofing",
+         "description": "Intercept network traffic using ARP spoofing",
+         "common_usage": "arpspoof -i {interface} -t {target} {host}",
+         "examples": [
+             {"description": "Basic spoofing", "command": "arpspoof -i eth0 -t 192.168.1.10 192.168.1.1"},
+             {"description": "Bidirectional", "command": "arpspoof -i eth0 -t 192.168.1.1 192.168.1.10"}
+         ]
+     },
+     {
+         "name": "hping3",
+         "category": "Sniffing & Spoofing",
+         "description": "Advanced packet crafting tool for TCP/IP auditing",
+         "common_usage": "hping3 [options] {host}",
+         "examples": [
+             {"description": "SYN scan", "command": "hping3 -S 192.168.1.1 -p 80"},
+             {"description": "Port scanning", "command": "hping3 -8 0-100 -S 192.168.1.1"},
+             {"description": "DDoS simulation", "command": "hping3 --flood -S 192.168.1.1 -p 80"}
+         ]
+     }
+ ])
+ 
+ # Privacy and Anonymity
+KALI_TOOLS.extend([
+     {
+         "name": "proxychains",
+         "category": "Information Gathering",
+         "description": "Tool that forces specified applications to use SOCKS/HTTP proxies",
+         "common_usage": "proxychains [options] {command} [arguments]",
+         "examples": [
+             {"description": "Basic usage", "command": "proxychains firefox"},
+             {"description": "With nmap", "command": "proxychains nmap -sT -P0 192.168.1.1"}
+         ]
+     },
+     {
+         "name": "tor",
+         "category": "Information Gathering",
+         "description": "Anonymizing overlay network for TCP",
+         "common_usage": "tor [options]",
+         "examples": [
+             {"description": "Start service", "command": "service tor start"},
+             {"description": "Browser usage", "command": "torbrowser-launcher"}
+         ]
+     }
+ ])
+ 
+ # Reverse Engineering
+KALI_TOOLS.extend([
+     {
+         "name": "ghidra",
+         "category": "Reverse Engineering",
+         "description": "Software reverse engineering (SRE) framework",
+         "common_usage": "ghidra",
+         "examples": [
+             {"description": "Start Ghidra", "command": "ghidra"},
+             {"description": "Headless analysis", "command": "ghidra_server"}
+         ]
+     },
+     {
+         "name": "radare2",
+         "category": "Reverse Engineering",
+         "description": "Framework for reverse engineering and binary analysis",
+         "common_usage": "r2 [options] {file}",
+         "examples": [
+             {"description": "Open binary", "command": "r2 binary"},
+             {"description": "Debug mode", "command": "r2 -d binary"},
+             {"description": "Analysis", "command": "r2 binary -A"}
+         ]
+     },
+     {
+         "name": "rizin",
+         "category": "Reverse Engineering",
+         "description": "Free and open source reverse engineering framework",
+         "common_usage": "rizin [options] {file}",
+         "examples": [
+             {"description": "Open binary", "command": "rizin binary"},
+             {"description": "Analysis", "command": "rizin -A binary"}
+         ]
+     }
+ ])
+ 
+ # Privilege Escalation
+KALI_TOOLS.extend([
+     {
+         "name": "linux-exploit-suggester",
+         "category": "Post Exploitation",
+         "description": "Tool suggesting Linux privilege escalation exploits",
+         "common_usage": "linux-exploit-suggester.sh [options]",
+         "examples": [
+             {"description": "Basic scan", "command": "linux-exploit-suggester.sh"},
+             {"description": "Kernel version", "command": "linux-exploit-suggester.sh -k 5.4.0"}
+         ]
+     },
+     {
+         "name": "windows-exploit-suggester",
+         "category": "Post Exploitation",
+         "description": "Tool suggesting Windows privilege escalation exploits",
+         "common_usage": "windows-exploit-suggester.py [options]",
+         "examples": [
+             {"description": "With systeminfo", "command": "windows-exploit-suggester.py --database 2021-01-01-mssb.xls --systeminfo systeminfo.txt"}
+         ]
+     },
+     {
+         "name": "linPEAS",
+         "category": "Post Exploitation",
+         "description": "Linux Privilege Escalation Awesome Script",
+         "common_usage": "linpeas.sh [options]",
+         "examples": [
+             {"description": "Full scan", "command": "linpeas.sh"},
+             {"description": "With colors", "command": "linpeas.sh -c"}
+         ]
+     },
+     {
+         "name": "winPEAS",
+         "category": "Post Exploitation",
+         "description": "Windows Privilege Escalation Awesome Script",
+         "common_usage": "winpeas.exe [options]",
+         "examples": [
+             {"description": "Full scan", "command": "winpeas.exe"},
+             {"description": "Specific check", "command": "winpeas.exe cmd systeminfo"}
+         ]
+     }
+ ])
+ 
+ # Container Security
+KALI_TOOLS.extend([
+     {
+         "name": "amicontained",
+         "category": "Post Exploitation",
+         "description": "Container introspection tool",
+         "common_usage": "amicontained",
+         "examples": [
+             {"description": "Basic check", "command": "amicontained"}
+         ]
+     },
+     {
+         "name": "docker-bench-security",
+         "category": "Vulnerability Analysis",
+         "description": "Docker security assessment tool",
+         "common_usage": "docker-bench-security.sh [options]",
+         "examples": [
+             {"description": "Full audit", "command": "docker-bench-security.sh"}
+         ]
+     }
+ ])
+ 
+ # Cloud Security
+KALI_TOOLS.extend([
+     {
+         "name": "awscli",
+         "category": "Post Exploitation",
+         "description": "AWS command line interface",
+         "common_usage": "aws [options] {command}",
+         "examples": [
+             {"description": "List S3 buckets", "command": "aws s3 ls"},
+             {"description": "EC2 instances", "command": "aws ec2 describe-instances"}
+         ]
+     },
+     {
+         "name": "pacu",
+         "category": "Post Exploitation",
+         "description": "AWS exploitation framework",
+         "common_usage": "pacu",
+         "examples": [
+             {"description": "Start framework", "command": "pacu"},
+             {"description": "Run module", "command": "run iam__enum_users_roles_policies_groups"}
+         ]
+     },
+     {
+         "name": "s3scanner",
+         "category": "Information Gathering",
+         "description": "Tool for finding open S3 buckets",
+         "common_usage": "s3scanner [options] {bucket}",
+         "examples": [
+             {"description": "Scan single bucket", "command": "s3scanner scan example-bucket"},
+             {"description": "Scan from file", "command": "s3scanner scan --buckets-file buckets.txt"}
+         ]
+     }
+ ])
+ 
+ # Network Defense
+KALI_TOOLS.extend([
+     {
+         "name": "snort",
+         "category": "Sniffing & Spoofing",
+         "description": "Network intrusion detection & prevention system",
+         "common_usage": "snort [options]",
+         "examples": [
+             {"description": "Test config", "command": "snort -T -c /etc/snort/snort.conf"},
+             {"description": "Packet logging", "command": "snort -l /var/log/snort"}
+         ]
+     },
+     {
+         "name": "fail2ban",
+         "category": "System Services",
+         "description": "Intrusion prevention framework to block brute force attacks",
+         "common_usage": "fail2ban-client [options] {command}",
+         "examples": [
+             {"description": "Status", "command": "fail2ban-client status"},
+             {"description": "Ban IP", "command": "fail2ban-client set sshd banip 192.168.1.100"}
+         ]
+     }
+ ])
+ 
+ # IoT Security
+KALI_TOOLS.extend([
+     {
+         "name": "firmwalker",
+         "category": "Vulnerability Analysis",
+         "description": "Script for searching firmware file systems",
+         "common_usage": "firmwalker.sh {firmware_directory}",
+         "examples": [
+             {"description": "Analyze firmware", "command": "firmwalker.sh /path/to/extracted_firmware"}
+         ]
+     },
+     {
+         "name": "baudrate",
+         "category": "Hardware Hacking",
+         "description": "Tool for identifying UART baud rates",
+         "common_usage": "baudrate [options] {device}",
+         "examples": [
+             {"description": "Auto detect", "command": "baudrate /dev/ttyUSB0"}
+         ]
+     }
+ ])
+ 
+ # Additional RF tools
+KALI_TOOLS.extend([
+     {
+         "name": "rtl_433",
+         "category": "Hardware Hacking",
+         "description": "Program to decode radio transmissions from devices on 433.92 MHz",
+         "common_usage": "rtl_433 [options]",
+         "examples": [
+             {"description": "Basic scan", "command": "rtl_433"},
+             {"description": "Specific frequency", "command": "rtl_433 -f 868M"},
+             {"description": "Save to file", "command": "rtl_433 -A -T 60 -f 433.92M -C si"}
+         ]
+     },
+     {
+         "name": "gqrx",
+         "category": "Hardware Hacking",
+         "description": "Software defined radio receiver",
+         "common_usage": "gqrx [options]",
+         "examples": [
+             {"description": "Start GUI", "command": "gqrx"}
+         ]
+     },
+     {
+         "name": "hackrf_info",
+         "category": "Hardware Hacking",
+         "description": "Tool to display HackRF device information",
+         "common_usage": "hackrf_info",
+         "examples": [
+             {"description": "Show info", "command": "hackrf_info"}
+         ]
+     }
+])
 
 if __name__ == "__main__":
     main() 
