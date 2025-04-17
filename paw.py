@@ -16,6 +16,14 @@ import importlib.util
 import re
 import socket
 
+# Add extensive_kali_tools import
+try:
+    from extensive_kali_tools import get_all_kali_tools, get_tool_categories, get_tools_by_category, get_tool_info
+    KALI_TOOLS_AVAILABLE = True
+except ImportError:
+    KALI_TOOLS_AVAILABLE = False
+    print("Warning: extensive_kali_tools.py not found or cannot be imported. Some features will be limited.")
+
 # Add rich library for fancy UI
 try:
     from rich.console import Console
@@ -188,6 +196,39 @@ class PAW:
         
         # Get config for adaptive mode
         self.adaptive_mode = config['DEFAULT'].getboolean('adaptive_mode', False)
+        
+        # Initialize Kali tools database if available
+        self.init_kali_tools()
+    
+    def init_kali_tools(self):
+        """Initialize the Kali tools database for use in command generation."""
+        if KALI_TOOLS_AVAILABLE:
+            try:
+                if RICH_AVAILABLE:
+                    console.print("[bold cyan]Loading Kali Linux tools database...[/]")
+                else:
+                    print("\033[1;34m[*] Loading Kali Linux tools database...\033[0m")
+                
+                # Load all Kali tools to ensure they're initialized
+                all_tools = get_all_kali_tools()
+                categories = get_tool_categories()
+                
+                if RICH_AVAILABLE:
+                    console.print(f"[bold green]Loaded {len(all_tools)} Kali Linux tools across {len(categories)} categories[/]")
+                else:
+                    print(f"\033[1;32m[+] Loaded {len(all_tools)} Kali Linux tools across {len(categories)} categories\033[0m")
+                
+                # Log successful tool loading
+                logger.info(f"Loaded {len(all_tools)} Kali Linux tools across {len(categories)} categories")
+                return True
+            except Exception as e:
+                logger.error(f"Error initializing Kali tools database: {e}")
+                if RICH_AVAILABLE:
+                    console.print(f"[bold red]Error loading Kali Linux tools database: {str(e)}[/]")
+                else:
+                    print(f"\033[1;31m[!] Error loading Kali Linux tools database: {str(e)}\033[0m")
+                return False
+        return False
     
     def get_network_interfaces(self):
         """Get a list of all available network interfaces on the system."""
@@ -223,6 +264,20 @@ class PAW:
             interfaces.append('lo')  # Add it back at the end
             
         return interfaces
+    
+    def detect_network_interface(self):
+        """Detect the primary network interface for the system."""
+        interfaces = self.get_network_interfaces()
+        if interfaces:
+            # Return the first non-loopback interface
+            for interface in interfaces:
+                if interface != 'lo':
+                    return interface
+            # If only loopback is available, return it
+            return interfaces[0]
+        else:
+            # Default to a common interface name if detection fails
+            return "eth0"
     
     def generate_llm_response(self, prompt):
         """Generate a response from the LLM using Ollama."""
@@ -276,27 +331,106 @@ class PAW:
     def extract_json_from_response(self, text):
         """Extract JSON from the LLM response."""
         try:
+            # First, try to directly parse the entire text as JSON
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                pass
+                
             # Find JSON in the response (might be surrounded by markdown code blocks)
+            # Look for JSON enclosed in triple backtick code blocks
+            json_pattern = r"```(?:json)?\s*(\{[\s\S]*?\})\s*```"
+            match = re.search(json_pattern, text)
+            
+            if match:
+                json_str = match.group(1)
+                return json.loads(json_str)
+                
+            # Try to extract any JSON object from the text
             json_start = text.find('{')
             json_end = text.rfind('}') + 1
             
-            if json_start != -1 and json_end != -1:
+            if json_start != -1 and json_end != -1 and json_end > json_start:
                 json_str = text[json_start:json_end]
-                return json.loads(json_str)
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    # If parsing fails, try to clean the JSON string
+                    # Some models might add escape characters that break JSON
+                    cleaned_json = re.sub(r'\\([^"])', r'\1', json_str)
+                    try:
+                        return json.loads(cleaned_json)
+                    except:
+                        pass
             
-            # If no JSON found, try to create a structured response from the text
-            return {
-                "plan": ["Process the request"],
-                "commands": [text.strip()],
-                "explanation": ["Generated command based on your request"]
-            }
+            # If no JSON found, look for key components to construct a response
+            plan_match = re.search(r"(Plan|Steps|Strategy):\s*\n((?:.+\n)+)", text, re.IGNORECASE)
+            cmd_match = re.search(r"(Command|Commands|Execution|Run):\s*\n((?:.+\n)+)", text, re.IGNORECASE)
+            exp_match = re.search(r"(Explanation|Description|Details):\s*\n((?:.+\n)+)", text, re.IGNORECASE)
+            
+            if cmd_match:  # If we at least found commands
+                plan = []
+                if plan_match:
+                    plan = [line.strip('- \t') for line in plan_match.group(2).strip().split('\n') if line.strip('- \t')]
+                
+                commands = [line.strip('- \t') for line in cmd_match.group(2).strip().split('\n') if line.strip('- \t')]
+                # Filter out non-commands (often numbered lists with explanations mixed in)
+                commands = [cmd for cmd in commands if not cmd.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.', '0.'))]
+                
+                explanation = []
+                if exp_match:
+                    explanation = [line.strip('- \t') for line in exp_match.group(2).strip().split('\n') if line.strip('- \t')]
+                
+                return {
+                    "plan": plan or ["Execute the requested task"],
+                    "commands": commands,
+                    "explanation": explanation or ["Execute the command to perform the requested task"] * len(commands)
+                }
+            
+            # If we couldn't find JSON or structured content, try to extract command lines
+            # Look for lines that look like shell commands (start with common command prefixes)
+            command_prefixes = ['sudo', 'apt', 'cd', 'ls', 'cat', 'grep', 'find', 'chmod', 'mkdir', 'rm', 
+                              'cp', 'mv', 'touch', 'echo', 'curl', 'wget', 'git', 'python', 'bash', 'sh',
+                              'nmap', 'nikto', 'hydra', 'john', 'hashcat', 'dirb', 'gobuster', 'wpscan',
+                              'sqlmap', 'msfconsole', 'msfvenom', 'tcpdump', 'wireshark', 'ifconfig',
+                              'ip', 'ssh', 'netstat', 'nc', 'ping', 'traceroute', 'whois', 'dig', 'host']
+            
+            potential_commands = []
+            for line in text.split('\n'):
+                line = line.strip()
+                if line and any(line.startswith(prefix) for prefix in command_prefixes):
+                    potential_commands.append(line)
+            
+            if potential_commands:
+                return {
+                    "plan": ["Execute the requested commands"],
+                    "commands": potential_commands,
+                    "explanation": [f"Executing command: {cmd}" for cmd in potential_commands]
+                }
+            
+            # If still no commands found, use the original approach - whole text as command
+            # But first check if it actually looks like a command rather than just text
+            if any(text.strip().startswith(prefix) for prefix in command_prefixes):
+                return {
+                    "plan": ["Process the request"],
+                    "commands": [text.strip()],
+                    "explanation": ["Generated command based on your request"]
+                }
+            else:
+                # If text doesn't look like a command, don't execute anything
+                return {
+                    "plan": ["No executable commands found in response"],
+                    "commands": [],
+                    "explanation": ["The model didn't generate a valid command. Please try rephrasing your request."]
+                }
             
         except json.JSONDecodeError:
-            # If JSON parsing fails, use the whole response as a command
+            # If JSON parsing fails, log it and return empty result rather than executing whole text
+            logger.error(f"Failed to parse JSON from response: {text[:100]}...")
             return {
-                "plan": ["Process the request"],
-                "commands": [text.strip()],
-                "explanation": ["Generated command based on your request"]
+                "plan": ["Failed to parse response from LLM"],
+                "commands": [],
+                "explanation": ["The response from the AI model couldn't be interpreted as valid commands. Please try again with a clearer request."]
             }
     
     def extract_variables(self, stdout):
@@ -751,12 +885,240 @@ class PAW:
             run_cmd = input("\033[1;35m[?] Execute this command? [y/n] (y): \033[0m").strip().lower()
             return run_cmd == "" or run_cmd == "y"
     
+    def extract_file_paths(self, text):
+        """Extract potential file paths from text, handling paths with spaces and quotes."""
+        # Try to match quoted paths first (handles spaces in paths)
+        quoted_paths = re.findall(r'["\']((?:/|\.)[^"\']+)["\']', text)
+        if quoted_paths:
+            return quoted_paths
+            
+        # Try to match unquoted paths
+        unquoted_paths = re.findall(r'(?<=\s|^)((?:/|\.)[^\s]+)(?=\s|$)', text)
+        
+        # For paths that might contain spaces
+        space_paths = []
+        if "New Folder" in text or "new folder" in text:
+            # Try to reconstruct paths with spaces
+            potential_paths = re.findall(r'(?:/[^\s/]+)+(?:\s+[^\s/]+)+\.[a-zA-Z0-9]+', text, re.IGNORECASE)
+            if potential_paths:
+                space_paths.extend(potential_paths)
+        
+        return quoted_paths + unquoted_paths + space_paths
+
+    def suggest_alternative_command(self, failed_cmd, stderr, variables):
+        """Suggest a completely different approach based on the failed command and error output."""
+        # Create context for generating alternative commands
+        context = f"""
+I need to suggest an ALTERNATIVE COMMAND for a failed cybersecurity operation.
+
+FAILED COMMAND: {failed_cmd}
+
+ERROR MESSAGE:
+{stderr}
+
+ORIGINAL REQUEST: {variables.get('request', 'No request information available')}
+
+Available variables: {json.dumps(variables, indent=2)}
+
+Based on this error, suggest a COMPLETELY DIFFERENT APPROACH using a different tool or technique.
+DO NOT simply fix syntax errors in the original command - provide a fundamentally different approach.
+
+Here are examples of alternative tools for different categories:
+
+1. Network scanning alternatives:
+   - If nmap failed, try masscan, netdiscover, or unicornscan
+   - If port scanning failed, try a different scan type or tool
+
+2. Web scanning alternatives:
+   - If nikto failed, try dirb, gobuster, or wpscan
+   - If dirb failed, try gobuster or ffuf
+   - If a web vulnerability scanner failed, try a different scanner or manual techniques
+
+3. Password cracking alternatives:
+   - If hashcat failed, try john or hydra
+   - If john failed, try hashcat
+   - If a specific wordlist didn't work, try a different wordlist or technique
+
+4. Exploitation alternatives:
+   - If metasploit failed, try a direct exploit or manual technique
+   - If a specific exploit failed, try a different exploit or approach
+
+5. Information gathering alternatives:
+   - If one reconnaissance tool failed, suggest an alternative
+   - If whois failed, try host, dig, or other DNS tools
+
+Respond with a JSON object containing:
+{{
+  "command": "alternative command to try",
+  "explanation": "why this alternative approach might work better"
+}}
+
+Make sure the alternative is genuinely different and appropriate for the task at hand.
+"""
+        try:
+            if RICH_AVAILABLE:
+                console.print("[bold cyan]Generating alternative approach...[/]")
+            
+            response = self.generate_llm_response(context)
+            
+            if "error" in response or not response:
+                return None, None
+                
+            alt_command = response.get("command", "")
+            if isinstance(alt_command, list) and alt_command:
+                alt_command = alt_command[0]
+                
+            explanation = response.get("explanation", "")
+            if isinstance(explanation, list) and explanation:
+                explanation = explanation[0]
+                
+            # Make sure we don't return the exact same command
+            if alt_command and alt_command != failed_cmd:
+                # Substitute variables in the alternative command
+                alt_command = self.substitute_variables(alt_command, variables)
+                return alt_command, explanation
+                
+        except Exception as e:
+            logger.error(f"Error generating alternative command: {e}")
+            
+        return None, None
+
     def handle_failed_command(self, cmd, result, variables, command_index, total_commands):
         """Handle a failed command by trying to fix it or asking user what to do."""
         # Try to fix the command
         fixed_cmd, suggestion, updated_vars = self.fix_failed_command(cmd, result["stderr"], variables)
         
-        if fixed_cmd != cmd:
+        # Special handling for hashcat info command failure
+        if "hashcat: unrecognized option '--info'" in result["stderr"]:
+            if RICH_AVAILABLE:
+                console.print("[bold yellow]Hashcat doesn't support the --info option on this system.[/]")
+                console.print("[bold cyan]Trying alternative commands for GPG password cracking...[/]")
+            else:
+                print("\033[1;33m[*] Hashcat doesn't support the --info option on this system.\033[0m")
+                print("\033[1;36m[*] Trying alternative commands for GPG password cracking...\033[0m")
+            
+            # Suggest a different command based on the file extension
+            if ".gpg" in str(variables.get('request', '')):
+                gpg_file = None
+                
+                # Extract file paths from the request
+                extracted_paths = self.extract_file_paths(variables.get('request', ''))
+                
+                for path in extracted_paths:
+                    if ".gpg" in path:
+                        gpg_file = path
+                        break
+                
+                if not gpg_file and 'request' in variables:
+                    # Try to extract the filename from the request with regex
+                    matches = re.findall(r'([^\s]+\.(?:tar\.)?gpg)', str(variables['request']))
+                    if matches:
+                        gpg_file = matches[0]
+                
+                if gpg_file:
+                    # Properly quote the file path if it contains spaces
+                    if ' ' in gpg_file and not (gpg_file.startswith('"') or gpg_file.startswith("'")):
+                        gpg_file = f'"{gpg_file}"'
+                    
+                    fixed_cmd = f"gpg2john {gpg_file} > hash.txt"
+                    suggestion = "Using gpg2john to extract the hash from the GPG file for cracking"
+                    if RICH_AVAILABLE:
+                        retry = Confirm.ask(f"Try using gpg2john on {gpg_file}?", default=True)
+                    else:
+                        print(f"\033[1;33m[*] Suggested fix: Use gpg2john on {gpg_file}\033[0m")
+                        retry = input("\033[1;35m[?] Try this approach? (y/n): \033[0m").strip().lower()
+                        retry = retry == "" or retry == "y"
+                    
+                    if retry:
+                        result = self.execute_command(fixed_cmd, updated_vars)
+                        self.display_result(result, command_index, total_commands)
+                        return result, updated_vars
+
+        # Special handling for file not found errors
+        if "No such file" in result["stderr"] or "not found" in result["stderr"]:
+            if ".gpg" in str(variables.get('request', '')):
+                # Ask user to provide the correct path to the GPG file
+                if RICH_AVAILABLE:
+                    gpg_file = Prompt.ask("[bold yellow]Enter the full path to the GPG file[/]")
+                else:
+                    gpg_file = input("\033[1;35m[?] Enter the full path to the GPG file: \033[0m").strip()
+                
+                if gpg_file:
+                    variables['gpg_file'] = gpg_file
+                    if "gpg2john" in cmd:
+                        fixed_cmd = f"gpg2john {gpg_file} > hash.txt"
+                        result = self.execute_command(fixed_cmd, variables)
+                        self.display_result(result, command_index, total_commands)
+                        return result, variables
+        
+        # Present options to the user for handling the failure
+        options = []
+        
+        # Option 1: Try the fixed command (if available)
+        has_fixed_cmd = fixed_cmd != cmd
+        if has_fixed_cmd:
+            options.append(("Fix the current command", fixed_cmd, suggestion))
+            
+        # Option 2: Try a completely different approach
+        alt_cmd, alt_explanation = self.suggest_alternative_command(cmd, result["stderr"], variables)
+        has_alt_cmd = alt_cmd is not None
+        if has_alt_cmd:
+            options.append(("Try a different approach", alt_cmd, alt_explanation))
+            
+        # Option 3: Skip this command
+        options.append(("Skip this command", None, "Skip this command and continue the workflow"))
+        
+        # If we have multiple options, present them to the user
+        if len(options) > 1:
+            if RICH_AVAILABLE:
+                console.print("[bold yellow]Command failed. Here are your options:[/]")
+                for i, (option_name, option_cmd, option_explanation) in enumerate(options, 1):
+                    console.print(f"[bold]{i}.[/] {option_name}")
+                    if option_cmd:
+                        console.print(f"   Command: [bold yellow]{option_cmd}[/]")
+                    if option_explanation:
+                        console.print(f"   [dim]{option_explanation}[/]")
+                    
+                choice = Prompt.ask(
+                    "[bold yellow]Choose an option[/]", 
+                    choices=[str(i) for i in range(1, len(options) + 1)],
+                    default="1"
+                )
+                choice_idx = int(choice) - 1
+            else:
+                print("\033[1;33m[*] Command failed. Here are your options:\033[0m")
+                for i, (option_name, option_cmd, option_explanation) in enumerate(options, 1):
+                    print(f"{i}. {option_name}")
+                    if option_cmd:
+                        print(f"   Command: {option_cmd}")
+                    if option_explanation:
+                        print(f"   {option_explanation}")
+                
+                choice = input("\033[1;35m[?] Choose an option [1]: \033[0m").strip()
+                if not choice:
+                    choice = "1"
+                choice_idx = int(choice) - 1
+                
+            # Execute the chosen option
+            option_name, option_cmd, option_explanation = options[choice_idx]
+            
+            if option_cmd is None:  # Skip command
+                return result, variables
+            
+            # Execute the selected command
+            if RICH_AVAILABLE:
+                console.print(f"[bold cyan]Executing: {option_cmd}[/]")
+                console.print(f"[dim]{option_explanation}[/]")
+            else:
+                print(f"\033[1;36m[*] Executing: {option_cmd}\033[0m")
+                print(f"\033[1;36m[*] {option_explanation}\033[0m")
+                
+            result = self.execute_command(option_cmd, updated_vars if option_cmd == fixed_cmd else variables)
+            self.display_result(result, command_index, total_commands)
+            return result, updated_vars if option_cmd == fixed_cmd else variables
+            
+        # If we only have one option (fixed command), use the old behavior
+        elif has_fixed_cmd:
             if suggestion:
                 if RICH_AVAILABLE:
                     console.print(f"[bold yellow]Suggestion:[/] {suggestion}")
@@ -836,6 +1198,23 @@ class PAW:
     
     def generate_next_command(self, request, previous_command, previous_output, variables):
         """Generate the next command based on the output of the previous command."""
+        # Check for specific patterns in previous command and output to provide better next steps
+        
+        # Handle gpg2john output
+        if "gpg2john" in previous_command and "hash.txt" in previous_command:
+            # After extracting hash with gpg2john, suggest using john to crack it
+            if os.path.exists("hash.txt"):
+                next_cmd = "john --wordlist=/usr/share/wordlists/rockyou.txt hash.txt"
+                explanation = "Using John the Ripper with rockyou.txt wordlist to crack the GPG password hash"
+                return next_cmd, explanation
+        
+        # Handle john password cracking results
+        if "john" in previous_command and "hash.txt" in previous_command:
+            if "password hashes cracked" in previous_output or "password hash cracked" in previous_output:
+                next_cmd = "john --show hash.txt"
+                explanation = "Displaying the cracked password(s)"
+                return next_cmd, explanation
+        
         # Create a context that includes the original request and previous results
         context = f"""
 As PAW (Prompt Assisted Workflow), I need you to generate the NEXT command in a cybersecurity workflow.
@@ -855,6 +1234,8 @@ IMPORTANT NOTES:
 - If the previous command was nmap and showed the host is down, suggest adding -Pn flag.
 - Do not use <your_ip> placeholders in commands, directly use the detected local IP.
 - Always adapt based on previous output and errors.
+- For password cracking tasks, prefer using john or hashcat with the rockyou.txt wordlist (/usr/share/wordlists/rockyou.txt).
+- For GPG files, use gpg2john to extract the hash, then use john to crack it.
 
 Based on the previous command and its output, generate the next most logical command to continue this workflow.
 Respond with a JSON object containing:
@@ -967,240 +1348,354 @@ The command should directly use the values from the previous output when appropr
                 else:
                     return result, None  # Abort execution
     
-    def process_request(self, request, adaptive_override=None):
-        """Process a natural language request."""
-        # Always use adaptive mode for one-by-one command generation
-        self.adaptive_mode = True
+    def validate_commands_for_prompt(self, request, commands, explanations):
+        """Validate that the generated commands match the user's intent"""
+        if not commands:
+            return {
+                "is_valid": False,
+                "feedback": "No commands were generated.",
+                "suggested_commands": []
+            }
             
-        # Clean up the request
-        request = request.strip()
-        
-        # Get initial variables
-        variables = {
-            'local_ip': self.get_local_ip()
+        # Construct validation context
+        validation_context = {
+            "user_request": request,
+            "generated_commands": commands,
+            "command_explanations": explanations
         }
         
-        # Add network interfaces
-        interfaces = self.get_network_interfaces()
-        if interfaces:
-            variables['network_interfaces'] = interfaces
-            variables['interface'] = interfaces[0]  # Use first interface as default
+        # Check for relevance to the request
+        request_terms = set(request.lower().split())
+        
+        # First use extensive_kali_tools if available
+        relevant_tools = []
+        if KALI_TOOLS_AVAILABLE:
+            try:
+                # Extract keywords from request
+                keywords = [word.lower() for word in request.split() if len(word) > 3]
+                
+                # Find relevant tool categories based on request
+                relevant_categories = set()
+                for keyword in keywords:
+                    # Common category mappings
+                    if any(term in keyword for term in ["network", "scan", "port", "discover"]):
+                        relevant_categories.add("Information Gathering")
+                    elif any(term in keyword for term in ["vuln", "exploit", "attack"]):
+                        relevant_categories.add("Vulnerability Analysis")
+                        relevant_categories.add("Exploitation Tools")
+                    elif any(term in keyword for term in ["web", "http", "site"]):
+                        relevant_categories.add("Web Application Analysis")
+                    elif any(term in keyword for term in ["password", "crack", "hash"]):
+                        relevant_categories.add("Password Attacks")
+                    elif any(term in keyword for term in ["wifi", "wireless"]):
+                        relevant_categories.add("Wireless Attacks")
+                
+                # Get recommended tools from these categories
+                for category in relevant_categories:
+                    try:
+                        category_tools = get_tools_by_category(category)
+                        if category_tools:
+                            for tool in category_tools:
+                                if "name" in tool:
+                                    relevant_tools.append(tool["name"])
+                    except Exception as e:
+                        logger.error(f"Error getting tools for category {category}: {e}")
+            except Exception as e:
+                logger.error(f"Error using Kali tools for validation: {e}")
+        
+        # Fallback to hardcoded common tools if no relevant tools found or no Kali tools available
+        if not relevant_tools:
+            common_tools = {
+                "mac address": ["macchanger", "ifconfig", "ip"],
+                "scan": ["nmap", "nikto", "dirb"],
+                "password": ["john", "hashcat", "hydra"],
+                "web": ["dirb", "gobuster", "nikto", "curl", "wget"],
+                "file": ["ls", "cat", "grep", "find"],
+                "network": ["ping", "traceroute", "netstat", "ss"]
+            }
             
-            # Special handling for MAC address change operations
+            # Check if appropriate tools are being used for the request
+            for key, tools in common_tools.items():
+                if key in request.lower():
+                    relevant_tools.extend(tools)
+        
+        # Check if any of the relevant tools are in the commands
+        tools_used = []
+        for cmd in commands:
+            for tool in relevant_tools:
+                if tool in cmd:
+                    tools_used.append(tool)
+        
+        # Check for critical steps that might be missing
+        required_steps = {}
+        if "mac" in request.lower() and "change" in request.lower():
+            required_steps = {
+                "check_current": any("ifconfig" in cmd or "ip link" in cmd for cmd in commands),
+                "change_mac": any("macchanger" in cmd for cmd in commands),
+                "verify_change": any(("ifconfig" in cmd or "ip link" in cmd) and cmd != commands[0] for cmd in commands)
+            }
+        
+        # Evaluate validation
+        is_valid = True
+        feedback = "Commands are appropriate for the request."
+        suggested_commands = []
+        
+        # Check if required tools are missing
+        if relevant_tools and not tools_used:
+            is_valid = False
+            feedback = f"Commands may not use the appropriate tools for this request. Consider using: {', '.join(relevant_tools[:5])}"
+            
+            # Suggest appropriate commands based on the request type
             if "mac" in request.lower() and "change" in request.lower():
-                # Check if a specific interface was mentioned in the request
-                specified_interface = None
-                for iface in interfaces:
-                    if iface in request.lower():
-                        specified_interface = iface
+                interface = self.detect_network_interface() or "eth0"
+                suggested_commands = [
+                    f"sudo ifconfig {interface} | grep ether",
+                    f"sudo macchanger -r {interface}",
+                    f"sudo ifconfig {interface} | grep ether"
+                ]
+            elif "scan" in request.lower() and "port" in request.lower():
+                target = "target_ip"
+                for word in request.split():
+                    if re.match(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', word):
+                        target = word
                         break
-                        
-                if specified_interface:
-                    variables['interface'] = specified_interface
-                else:
-                    # Show available interfaces to the user
-                    if RICH_AVAILABLE:
-                        console.print("[bold cyan]Available network interfaces:[/]")
-                        for i, iface in enumerate(interfaces):
-                            console.print(f"  [bold]{i+1}.[/] {iface}")
-                        
-                        choice = Prompt.ask(
-                            "[bold yellow]Select interface for MAC address change[/]", 
-                            choices=[str(i+1) for i in range(len(interfaces))], 
-                            default="1"
-                        )
-                        variables['interface'] = interfaces[int(choice)-1]
-                    else:
-                        print("\033[1;36m[*] Available network interfaces:\033[0m")
-                        for i, iface in enumerate(interfaces):
-                            print(f"  {i+1}. {iface}")
-                        
-                        choice = input("\033[1;35m[?] Select interface for MAC address change [1]: \033[0m").strip()
-                        if not choice:
-                            choice = "1"
-                        variables['interface'] = interfaces[int(choice)-1]
-                        
-                    # Update the request to include the selected interface
-                    request = f"{request} on {variables['interface']}"
+                suggested_commands = [f"sudo nmap -sS -p- {target}"]
+            elif KALI_TOOLS_AVAILABLE:
+                # Try to get example commands from Kali tools database
+                for tool_name in relevant_tools[:2]:  # Get examples from top 2 tools
+                    try:
+                        tool_info = get_tool_info(tool_name)
+                        if tool_info and "examples" in tool_info:
+                            examples = tool_info["examples"]
+                            if examples:
+                                if isinstance(examples[0], dict):
+                                    # New format with description and command
+                                    suggested_commands.append(examples[0]["command"])
+                                else:
+                                    # Old format with just command strings
+                                    suggested_commands.append(examples[0])
+                    except Exception as e:
+                        logger.error(f"Error getting examples for tool {tool_name}: {e}")
+            
+        # Check for missing critical steps
+        if required_steps and not all(required_steps.values()):
+            is_valid = False
+            missing_steps = [step for step, present in required_steps.items() if not present]
+            feedback = f"Commands are missing critical steps: {', '.join(missing_steps)}"
         
-        # Generate initial context for the first command
-        context = f"""
-As PAW (Prompt Assisted Workflow), analyze this cybersecurity request and provide a plan and the FIRST command to execute:
+        return {
+            "is_valid": is_valid,
+            "feedback": feedback,
+            "suggested_commands": suggested_commands
+        }
 
-REQUEST: {request}
-
-Consider the following Kali Linux tools and their key options when appropriate:
-
-1. Network scanning:
-   - nmap: -sS (stealth scan), -sV (version detection), -O (OS detection), -A (aggressive), -p (port range), -Pn (skip discovery)
-   - masscan: -p (ports), --rate (packets per second), --range (scan range), --banners (capture banners)
-   - netdiscover: -r (range), -i (interface), -p (passive mode)
-
-2. Web scanning:
-   - nikto: -h (host), -port (port to scan), -ssl, -Tuning (scan tuning)
-   - dirb: [url] [wordlist], -a (user agent), -z (delay), -o (output file)
-   - gobuster: -u (url), -w (wordlist), -x (extensions), -t (threads)
-   - wpscan: --url (WordPress URL), --api-token, -e (enumerate)
-
-3. Vulnerability scanning:
-   - openvas: -u (user), -p (password), -T (target)
-   - nessus: similar to OpenVAS with web interface
-   - lynis: audit system, --pentest (pentest mode)
-
-4. Exploitation:
-   - metasploit: use (module), set (option), exploit/run, sessions
-   - sqlmap: -u (URL), --data (POST data), --dbms (database type), --dump
-   - hydra: -l/-L (login), -p/-P (password), -t (tasks), service://server
-
-5. Reconnaissance:
-   - whois: [domain], -h (host)
-   - theHarvester: -d (domain), -b (source), -l (limit)
-   - recon-ng: use (module), set (option), run
-   - maltego: GUI-based with transforms
-
-6. Password attacks:
-   - hashcat: -m (hash type), -a (attack mode), -o (output file)
-   - john: --wordlist (wordlist file), --rules, --format (hash type)
-   - crunch: [min] [max] [charset], -t (pattern), -o (output)
-
-7. Wireless:
-   - aircrack-ng: -w (wordlist), -b (BSSID)
-   - wifite: -wpa (attack WPA), -wep (attack WEP), -wps (attack WPS)
-   - kismet: -c (interface), -f (file), -s (server mode)
-
-8. Forensics and analysis:
-   - volatility: -f (file), --profile (OS profile), plugin commands
-   - autopsy: GUI-based forensic platform
-   - wireshark/tshark: -i (interface), -c (packet count), -r (read file)
-   - tcpdump: -i (interface), -n (don't resolve), -w (write to file)
-
-9. Specialized tools:
-   - binwalk: -e (extract), -M (recursive scan)
-   - steghide: embed/extract, -sf (stego file), -p (passphrase)
-   - macchanger: -r (random MAC), -m (specified MAC)
-   - enum4linux: -a (all enumeration), -u (user), -p (pass)
-   - msfvenom: -p (payload), -f (format), -e (encoder)
-
-INSTRUCTIONS:
-1. First, outline a high-level plan of action in 2-4 bullet points.
-2. ONLY provide the FIRST command to execute. Do not list all commands at once.
-3. Explain what this first command does.
-
-Respond with a JSON object containing:
-{{
-  "plan": ["step 1", "step 2", ...],
-  "commands": ["FIRST_COMMAND_ONLY"],
-  "explanation": ["Explanation of the first command"]
-}}
-
-Available variables detected: {json.dumps(variables, indent=2)}
-"""
+    def process_request(self, request, adaptive_mode=None):
+        """Generate a response from the model and execute the commands"""
+        # Extract any command placeholders or key terms for specialized handling
+        interface_pattern = r'\b(?:eth[0-9]|wlan[0-9]|tun[0-9]|lo)\b'
+        mac_pattern = r'\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b'
+        ip_pattern = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'
         
-        response = self.generate_llm_response(context)
+        # Extract key terms from the request
+        interfaces = re.findall(interface_pattern, request)
+        mac_addresses = re.findall(mac_pattern, request)
+        ip_addresses = re.findall(ip_pattern, request)
         
+        # Special handling for specific operations
+        is_mac_change_request = any(term in request.lower() for term in ['mac', 'mac address', 'change mac', 'spoof mac'])
+        is_password_request = any(term in request.lower() for term in ['password', 'crack', 'decrypt', 'gpg'])
+        
+        # Use provided adaptive_mode or fall back to the instance variable
+        if adaptive_mode is None:
+            adaptive_mode = self.adaptive_mode
+
+        # Get local machine details for command substitution
+        detected_interface = self.detect_network_interface()
+        local_ip = self.get_local_ip()
+        
+        # Build context for command generation
+        context = [
+            "You are a helpful Linux command assistant. Generate appropriate commands based on the user's request.",
+            "You must return a JSON object with the following structure: {\"plan\": [steps], \"commands\": [commands], \"explanation\": [explanations]}",
+            "IMPORTANT: Your commands MUST directly address the user's request and be appropriate for their system.",
+            "Use the correct tools based on the user's request (e.g., macchanger for MAC address changes, nmap for scanning).",
+            f"ALWAYS run commands as root (use sudo) when accessing privileged resources.",
+            "If a command requires an interface, use: " + (interfaces[0] if interfaces else detected_interface or "eth0"),
+            "If a command requires a local IP, use: " + (ip_addresses[0] if ip_addresses else local_ip or "127.0.0.1"),
+        ]
+        
+        # Add specialized guidance for specific request types
+        if is_mac_change_request:
+            context.append("For MAC address changes, use macchanger. First check the current MAC with ifconfig or ip link, then use macchanger -r <interface> for a random MAC.")
+        
+        if is_password_request and "gpg" in request.lower():
+            context.append("For GPG password cracking, use gpg2john to extract the hash, then john to crack it.")
+        
+        # Add Kali tools guidance from extensive_kali_tools if available
+        if KALI_TOOLS_AVAILABLE:
+            try:
+                # Get all available Kali tools
+                all_kali_tools = get_all_kali_tools()
+                
+                # Extract keywords from request
+                keywords = [word.lower() for word in request.split() if len(word) > 3]
+                
+                # Find relevant tool categories based on request
+                relevant_categories = set()
+                for keyword in keywords:
+                    # Common category mappings
+                    if any(term in keyword for term in ["network", "scan", "port", "discover"]):
+                        relevant_categories.add("Information Gathering")
+                    elif any(term in keyword for term in ["vuln", "exploit", "attack"]):
+                        relevant_categories.add("Vulnerability Analysis")
+                        relevant_categories.add("Exploitation Tools")
+                    elif any(term in keyword for term in ["web", "http", "site"]):
+                        relevant_categories.add("Web Application Analysis")
+                    elif any(term in keyword for term in ["password", "crack", "hash"]):
+                        relevant_categories.add("Password Attacks")
+                    elif any(term in keyword for term in ["wifi", "wireless"]):
+                        relevant_categories.add("Wireless Attacks")
+                
+                # If no specific categories identified, suggest some based on common tasks
+                if not relevant_categories:
+                    relevant_categories = {"Information Gathering", "Vulnerability Analysis"}
+                
+                # Build tool recommendations for context
+                tool_recommendations = []
+                
+                # Add category-specific tool recommendations
+                for category in relevant_categories:
+                    try:
+                        category_tools = get_tools_by_category(category)
+                        if category_tools and len(category_tools) > 0:
+                            # Get up to 3 tools from each category
+                            sample_tools = category_tools[:3]
+                            
+                            # Add category header
+                            tool_recommendations.append(f"\nFor {category}, consider these tools:")
+                            
+                            # Add details for each tool
+                            for tool in sample_tools:
+                                tool_name = tool.get("name", "")
+                                description = tool.get("description", "")
+                                common_usage = tool.get("common_usage", "")
+                                examples = tool.get("examples", [])
+                                
+                                # Add tool details
+                                tool_recommendations.append(f"- {tool_name}: {description}")
+                                tool_recommendations.append(f"  Usage: {common_usage}")
+                                
+                                # Add 1-2 examples if available
+                                if examples and len(examples) > 0:
+                                    if isinstance(examples[0], dict):
+                                        # New format: list of dictionaries with description and command
+                                        for i, example in enumerate(examples[:2]):
+                                            tool_recommendations.append(f"  Example: {example.get('command')} - {example.get('description')}")
+                                    else:
+                                        # Old format: list of example command strings
+                                        for i, example in enumerate(examples[:2]):
+                                            tool_recommendations.append(f"  Example: {example}")
+                    except Exception as e:
+                        logger.error(f"Error getting tools for category {category}: {e}")
+                
+                # Add tool recommendations to context if any were found
+                if tool_recommendations:
+                    context.append("\nRECOMMENDED KALI LINUX TOOLS FOR THIS REQUEST:")
+                    context.extend(tool_recommendations)
+                    
+                    # Add reminder to use these tools
+                    context.append("\nIMPORTANT: Please use the appropriate tools from the list above when generating commands.")
+            except Exception as e:
+                logger.error(f"Error loading Kali tools information: {e}")
+                
+        # Generate the response
+        response = self.generate_llm_response("\n".join(context) + "\n\nRequest: " + request)
         if "error" in response:
             if RICH_AVAILABLE:
-                console.print(f"[bold red]Error:[/] {response['error']}")
+                console.print(f"[bold red]{response['error']}[/]")
             else:
-                print(f"\033[1;31m[!] Error: {response['error']}\033[0m")
-            return
+                print(f"\033[1;31m[!] {response['error']}\033[0m")
+            return response
         
-        # Display the plan
-        plan = response.get("plan", [])
-        self.display_plan(plan)
-        
-        # Get the first command and explanation
-        commands = response.get("commands", [])
-        explanations = response.get("explanation", [""] * len(commands))
-        
-        if not commands:
-            if RICH_AVAILABLE:
-                console.print("[bold yellow]No commands were generated for this request.[/]")
-            else:
-                print("\033[1;33m[!] No commands were generated for this request.\033[0m")
-            return
-        
-        # Only take the first command
-        cmd = commands[0] if commands else ""
-        explanation = explanations[0] if explanations else ""
-        
-        # Execute commands one by one
-        command_index = 0
-        total_commands = 1  # Only counting the current command
-        prev_output = ""
-        prev_command = ""
-        
-        while cmd:
-            command_index += 1
+        try:
+            # Extract the plan, commands, and explanations
+            plan = response.get("plan", ["Execute the requested task"])
+            commands = response.get("commands", [])
+            explanations = response.get("explanation", [])
+
+            # Make sure explanations match commands in length
+            if len(explanations) < len(commands):
+                explanations.extend(["Execute the command"] * (len(commands) - len(explanations)))
             
-            # Clean up the command (remove comments and whitespace)
-            cmd = cmd.split("//")[0].strip()
+            # Validate that the commands match the user's intent
+            validation = self.validate_commands_for_prompt(request, commands, explanations)
             
-            # Substitute variables
-            cmd = self.substitute_variables(cmd, variables)
+            # If validation suggests improvements, show them to the user
+            if validation.get("suggested_commands") and not validation.get("is_valid"):
+                logger.info(f"Command validation suggested improvements: {validation['feedback']}")
+                print(f"\n\033[93mValidation feedback: {validation['feedback']}\033[0m")
+                print("\033[93mSuggested commands:\033[0m")
+                for i, cmd in enumerate(validation.get("suggested_commands", [])):
+                    print(f"\033[93m{i+1}. {cmd}\033[0m")
+                print("\033[93mConsider using these commands instead.\033[0m\n")
             
-            # Display command and get confirmation in a single step
-            execute = self.display_single_command(cmd, explanation, command_index, total_commands)
+            # Display the plan
+            self.display_plan(plan)
             
-            if not execute:
-                break
-            
-            # Execute command
-            result = self.execute_command(cmd, variables)
-            
-            # Store output for potential use in next commands
-            prev_output = result["stdout"] + result["stderr"]
-            prev_command = cmd
-            
-            # Display result
-            success = self.display_result(result, command_index, total_commands)
-            
-            # If command failed, try to fix it
-            if not success:
-                result, variables = self.handle_failed_command(cmd, result, variables, command_index, total_commands)
-                prev_output = result["stdout"] + result["stderr"]
-                success = (result["exit_code"] == 0)
-            
-            # Only continue if the command was successful
-            if success:
-                # Ask if user wants to continue
-                if RICH_AVAILABLE:
-                    console.print("\nCommand completed successfully")
-                    continue_workflow = Confirm.ask("Generate next command based on this output?", default=True)
-                else:
-                    print("\n\033[1;36m[*] Command completed successfully\033[0m")
-                    continue_workflow = input("\033[1;35m[?] Generate next command based on this output? (y/n): \033[0m").strip().lower()
-                    continue_workflow = continue_workflow == "" or continue_workflow == "y"
+            # If we have commands, display and execute them
+            if commands:
+                # Display the commands with their explanations
+                self.display_commands(commands, explanations)
                 
-                if continue_workflow:
-                    # Generate next command without using Progress
-                    next_cmd, next_explanation = self.generate_next_command(
-                        request, prev_command, prev_output, variables
-                    )
+                # If in adaptive mode, let the user select commands one by one
+                if adaptive_mode:
+                    # Handle commands one at a time, generating follow-up commands
+                    variables = {"request": request}
+                    selected_commands, _ = self.interactive_command_selection(commands, explanations)
                     
-                    if next_cmd:
-                        cmd = next_cmd
-                        explanation = next_explanation
-                        total_commands += 1  # Increment total for display purposes
-                    else:
-                        if RICH_AVAILABLE:
-                            console.print("[bold yellow]Could not generate the next command. The workflow is complete.[/]")
-                        else:
-                            print("\033[1;33m[*] Could not generate the next command. The workflow is complete.\033[0m")
-                        break
+                    for i, cmd in enumerate(selected_commands, 1):
+                        # Execute the command and capture its output
+                        result = self.execute_command(cmd, variables)
+                        self.display_result(result, i, len(selected_commands))
+                        
+                        # Update variables with any values extracted from the output
+                        variables.update(result.get("variables", {}))
                 else:
-                    # User chose not to continue
-                    break
+                    # Execute all commands in sequence with y/n confirmation
+                    variables = {"request": request}
+                    for i, (cmd, explanation) in enumerate(zip(commands, explanations), 1):
+                        if self.display_single_command(cmd, explanation, i, len(commands)):
+                            # Execute the command
+                            result = self.execute_command(cmd, variables)
+                            self.display_result(result, i, len(commands))
+                            
+                            # If command failed and we need to handle it
+                            if result["exit_code"] != 0:
+                                result, variables = self.handle_failed_command(cmd, result, variables, i, len(commands))
+                            
+                            # Update variables with any values extracted from the output
+                            variables.update(result.get("variables", {}))
+                        else:
+                            # User chose not to execute this command
+                            if RICH_AVAILABLE:
+                                console.print(f"[yellow]Skipping command: {cmd}[/]")
+                            else:
+                                print(f"\033[1;33m[*] Skipping command: {cmd}\033[0m")
             else:
-                # Command failed and couldn't be fixed
-                break
-        
-        # Final summary
-        if RICH_AVAILABLE:
-            console.print(Panel("[bold green]Workflow completed[/]", 
-                             border_style=self.theme['success']))
-        else:
-            print("\n\033[1;32m[+] Workflow completed\033[0m")
+                # No commands were generated
+                if RICH_AVAILABLE:
+                    console.print("[bold yellow]No commands were generated for this request.[/]")
+                else:
+                    print("\033[1;33m[!] No commands were generated for this request.\033[0m")
+            
+            return response
+        except Exception as e:
+            logger.error(f"Failed to process response: {e}")
+            if RICH_AVAILABLE:
+                console.print(f"[bold red]Error: {str(e)}[/]")
+            else:
+                print(f"\033[1;31m[!] Error: {str(e)}\033[0m")
+            return {"error": f"Failed to process response: {e}"}
 
 def main():
     parser = argparse.ArgumentParser(description="PAW - Prompt Assisted Workflow for Kali Linux")
