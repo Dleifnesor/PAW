@@ -16,6 +16,10 @@ import importlib.util
 import re
 import socket
 
+# Add the current directory to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
 # Add extensive_kali_tools import
 try:
     from extensive_kali_tools import get_all_kali_tools, get_tool_categories, get_tools_by_category, get_tool_info
@@ -42,7 +46,6 @@ except ImportError:
 
 # Add the PAW lib directory to the Python path
 # Try local lib first, then system path
-current_dir = os.path.dirname(os.path.abspath(__file__))
 local_lib_path = os.path.join(current_dir, 'lib')
 if os.path.exists(local_lib_path):
     sys.path.append(local_lib_path)
