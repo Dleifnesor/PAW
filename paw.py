@@ -15,29 +15,54 @@ import httpx
 import importlib.util
 import re
 import socket
+from typing import List, Dict
 
-# Primary installation directory
-INSTALL_DIR = '/usr/local/share/paw'
+# Get the absolute path of the current script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Add all possible paths to Python path
-paths_to_add = [
-    INSTALL_DIR,
-    os.path.join(INSTALL_DIR, 'lib'),
-    os.path.dirname(os.path.abspath(__file__)),
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')
+# Define possible installation paths
+POSSIBLE_INSTALL_PATHS = [
+    '/usr/local/share/paw',  # System-wide installation
+    os.path.join(SCRIPT_DIR, 'lib'),  # Local development
+    SCRIPT_DIR,  # Current directory
 ]
 
-for path in paths_to_add:
+# Add all possible paths to Python path, avoiding duplicates
+for path in POSSIBLE_INSTALL_PATHS:
     if os.path.exists(path) and path not in sys.path:
         sys.path.insert(0, path)
 
-# Add extensive_kali_tools import
+# Clear any existing duplicate paths
+sys.path = list(dict.fromkeys(sys.path))
+
+# Try importing required modules with fallbacks
 try:
-    from extensive_kali_tools import get_all_kali_tools, get_tool_categories, get_tools_by_category, get_tool_info
-    KALI_TOOLS_AVAILABLE = True
+    import tools_registry
 except ImportError:
-    KALI_TOOLS_AVAILABLE = False
-    print("Warning: extensive_kali_tools.py not found or cannot be imported. Some features will be limited.")
+    try:
+        from lib import tools_registry
+    except ImportError:
+        print("Error: Could not import PAW tools_registry module.")
+        print("Current Python path:")
+        for path in sys.path:
+            print(f"  - {path}")
+        print("\nMake sure PAW is installed correctly.")
+        sys.exit(1)
+
+try:
+    import ascii_art
+except ImportError:
+    try:
+        from lib import ascii_art
+    except ImportError:
+        print("Warning: Could not import ascii_art module. Some features may be limited.")
+        ascii_art = None
+
+try:
+    import extensive_kali_tools
+except ImportError:
+    print("Warning: Could not import extensive_kali_tools module. Kali tools functionality will be limited.")
+    extensive_kali_tools = None
 
 # Add rich library for fancy UI
 try:
@@ -54,29 +79,6 @@ try:
 except ImportError:
     print("For a better experience, install rich: pip install rich")
     RICH_AVAILABLE = False
-
-# Try importing required modules
-try:
-    # First try direct imports
-    try:
-        from tools_registry import get_tools_registry
-        from ascii_art import display_ascii_art
-    except ImportError:
-        # If that fails, try importing from lib directory
-        try:
-            from lib.tools_registry import get_tools_registry
-            from lib.ascii_art import display_ascii_art
-        except ImportError as e:
-            print(f"Error: Could not import PAW tools_registry module.")
-            print("Current Python path:")
-            for path in sys.path:
-                print(f"  - {path}")
-            print("\nMake sure PAW is installed correctly and this script is in the correct directory.")
-            print("You can install PAW by running: bash install.sh")
-            sys.exit(1)
-except Exception as e:
-    print(f"Unexpected error: {e}")
-    sys.exit(1)
 
 # Set up logging
 logging.basicConfig(
@@ -200,51 +202,175 @@ def show_fancy_header(title, subtitle=None):
 
 class PAW:
     def __init__(self):
-        self.tools_registry = get_tools_registry()
+        # Initialize tools registry
+        self.tools_registry = tools_registry.get_tools_registry()
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_file = os.path.join(LOG_DIRECTORY, f"paw_session_{self.session_id}.log")
-        self.theme = THEMES[THEME]
         
-        if LOG_COMMANDS:
-            file_handler = logging.FileHandler(self.log_file)
-            file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-            logger.addHandler(file_handler)
-        
-        # Get config for adaptive mode
-        self.adaptive_mode = config['DEFAULT'].getboolean('adaptive_mode', False)
-        
-        # Initialize Kali tools database if available
-        self.init_kali_tools()
-    
+        # Initialize Kali tools if available
+        self.kali_tools = None
+        self.kali_categories = None
+        if extensive_kali_tools:
+            try:
+                self.kali_tools = extensive_kali_tools.get_all_kali_tools()
+                self.kali_categories = extensive_kali_tools.get_tool_categories()
+                print("Kali tools integration initialized successfully.")
+            except Exception as e:
+                print(f"Warning: Could not initialize Kali tools: {e}")
+                self.kali_tools = None
+                self.kali_categories = None
+
     def init_kali_tools(self):
         """Initialize the Kali tools database for use in command generation."""
-        if KALI_TOOLS_AVAILABLE:
+        if extensive_kali_tools:
             try:
                 if RICH_AVAILABLE:
-                    console.print("[bold cyan]Loading Kali Linux tools database...[/]")
+                    console.print("[bold green]Initializing Kali tools database...[/bold green]")
                 else:
-                    print("\033[1;34m[*] Loading Kali Linux tools database...\033[0m")
+                    print("Initializing Kali tools database...")
                 
                 # Load all Kali tools to ensure they're initialized
-                all_tools = get_all_kali_tools()
-                categories = get_tool_categories()
+                self.kali_tools = extensive_kali_tools.get_all_kali_tools()
+                self.kali_categories = extensive_kali_tools.get_tool_categories()
                 
                 if RICH_AVAILABLE:
-                    console.print(f"[bold green]Loaded {len(all_tools)} Kali Linux tools across {len(categories)} categories[/]")
+                    console.print(f"[green]Loaded {len(self.kali_tools)} Kali tools across {len(self.kali_categories)} categories[/green]")
                 else:
-                    print(f"\033[1;32m[+] Loaded {len(all_tools)} Kali Linux tools across {len(categories)} categories\033[0m")
+                    print(f"Loaded {len(self.kali_tools)} Kali tools across {len(self.kali_categories)} categories")
                 
-                # Log successful tool loading
-                logger.info(f"Loaded {len(all_tools)} Kali Linux tools across {len(categories)} categories")
                 return True
             except Exception as e:
-                logger.error(f"Error initializing Kali tools database: {e}")
                 if RICH_AVAILABLE:
-                    console.print(f"[bold red]Error loading Kali Linux tools database: {str(e)}[/]")
+                    console.print(f"[yellow]Warning: Could not initialize Kali tools: {e}[/yellow]")
                 else:
-                    print(f"\033[1;31m[!] Error loading Kali Linux tools database: {str(e)}\033[0m")
+                    print(f"Warning: Could not initialize Kali tools: {e}")
                 return False
         return False
+
+    def get_relevant_kali_tools(self, request: str) -> List[str]:
+        """Get relevant Kali tools based on the request."""
+        if not extensive_kali_tools or not self.kali_tools:
+            return []
+            
+        try:
+            # Extract keywords from request
+            keywords = request.lower().split()
+            
+            # Get relevant categories
+            relevant_categories = []
+            for category in self.kali_categories:
+                if any(keyword in category.lower() for keyword in keywords):
+                    relevant_categories.append(category)
+            
+            # Get tools from relevant categories
+            relevant_tools = []
+            for category in relevant_categories:
+                try:
+                    category_tools = extensive_kali_tools.get_tools_by_category(category)
+                    if category_tools:
+                        for tool in category_tools:
+                            if tool["name"] not in relevant_tools:
+                                relevant_tools.append(tool["name"])
+                except Exception as e:
+                    print(f"Warning: Error getting tools for category {category}: {e}")
+            
+            return relevant_tools
+        except Exception as e:
+            print(f"Warning: Error getting relevant Kali tools: {e}")
+            return []
+
+    def suggest_alternative_command(self, failed_cmd: str, stderr: str, variables: Dict[str, str]) -> List[str]:
+        """Suggest alternative commands based on the error and available tools."""
+        suggested_commands = []
+        
+        # First use extensive_kali_tools if available
+        relevant_tools = []
+        if extensive_kali_tools and self.kali_tools:
+            try:
+                # Extract keywords from error message
+                keywords = stderr.lower().split()
+                
+                # Get relevant categories
+                relevant_categories = []
+                for category in self.kali_categories:
+                    if any(keyword in category.lower() for keyword in keywords):
+                        relevant_categories.append(category)
+                
+                # Get tools from relevant categories
+                for category in relevant_categories:
+                    try:
+                        category_tools = extensive_kali_tools.get_tools_by_category(category)
+                        if category_tools:
+                            for tool in category_tools:
+                                if tool["name"] not in relevant_tools:
+                                    relevant_tools.append(tool["name"])
+                    except Exception as e:
+                        print(f"Warning: Error getting tools for category {category}: {e}")
+                
+                # Try to get example commands from Kali tools database
+                for tool_name in relevant_tools[:2]:  # Get examples from top 2 tools
+                    try:
+                        tool_info = extensive_kali_tools.get_tool_info(tool_name)
+                        if tool_info and "examples" in tool_info:
+                            examples = tool_info["examples"]
+                            for example in examples:
+                                if "command" in example:
+                                    suggested_commands.append(example["command"])
+                    except Exception as e:
+                        print(f"Warning: Error getting tool info for {tool_name}: {e}")
+            except Exception as e:
+                print(f"Warning: Error suggesting alternative commands: {e}")
+        
+        # If no suggestions from Kali tools, add some generic ones
+        if not suggested_commands:
+            if "nmap" in failed_cmd:
+                suggested_commands = [f"sudo nmap -sS -p- {variables.get('target', 'TARGET_IP')}"]
+            elif "hydra" in failed_cmd:
+                suggested_commands = [f"hydra -L users.txt -P passwords.txt {variables.get('target', 'TARGET_IP')} ssh"]
+            else:
+                suggested_commands = [f"sudo {failed_cmd}"]
+        
+        return suggested_commands
+
+    def generate_next_command(self, request: str, previous_command: str, previous_output: str, variables: Dict[str, str]) -> str:
+        """Generate the next command based on the request and previous output."""
+        # First use extensive_kali_tools if available
+        if extensive_kali_tools and self.kali_tools:
+            try:
+                # Get all available Kali tools
+                all_kali_tools = self.kali_tools
+                
+                # Extract keywords from request
+                keywords = request.lower().split()
+                
+                # Get relevant categories
+                relevant_categories = []
+                for category in self.kali_categories:
+                    if any(keyword in category.lower() for keyword in keywords):
+                        relevant_categories.append(category)
+                
+                # Get tools from relevant categories
+                relevant_tools = []
+                for category in relevant_categories:
+                    try:
+                        category_tools = extensive_kali_tools.get_tools_by_category(category)
+                        if category_tools and len(category_tools) > 0:
+                            # Get up to 3 tools from each category
+                            relevant_tools.extend([tool["name"] for tool in category_tools[:3]])
+                    except Exception as e:
+                        print(f"Warning: Error getting tools for category {category}: {e}")
+                
+                # If we found relevant tools, use them
+                if relevant_tools:
+                    # Get the first tool's example command
+                    tool_info = extensive_kali_tools.get_tool_info(relevant_tools[0])
+                    if tool_info and "examples" in tool_info and tool_info["examples"]:
+                        return tool_info["examples"][0]["command"]
+            except Exception as e:
+                print(f"Warning: Error generating command from Kali tools: {e}")
+        
+        # Fallback to default command generation if Kali tools failed
+        return f"sudo {request}"
     
     def get_network_interfaces(self):
         """Get a list of all available network interfaces on the system."""
@@ -1385,7 +1511,7 @@ The command should directly use the values from the previous output when appropr
         
         # First use extensive_kali_tools if available
         relevant_tools = []
-        if KALI_TOOLS_AVAILABLE:
+        if extensive_kali_tools and extensive_kali_tools.KALI_TOOLS_AVAILABLE:
             try:
                 # Extract keywords from request
                 keywords = [word.lower() for word in request.split() if len(word) > 3]
@@ -1409,7 +1535,7 @@ The command should directly use the values from the previous output when appropr
                 # Get recommended tools from these categories
                 for category in relevant_categories:
                     try:
-                        category_tools = get_tools_by_category(category)
+                        category_tools = tools_registry.get_tools_by_category(category)
                         if category_tools:
                             for tool in category_tools:
                                 if "name" in tool:
@@ -1476,11 +1602,11 @@ The command should directly use the values from the previous output when appropr
                         target = word
                         break
                 suggested_commands = [f"sudo nmap -sS -p- {target}"]
-            elif KALI_TOOLS_AVAILABLE:
+            elif extensive_kali_tools and extensive_kali_tools.KALI_TOOLS_AVAILABLE:
                 # Try to get example commands from Kali tools database
                 for tool_name in relevant_tools[:2]:  # Get examples from top 2 tools
                     try:
-                        tool_info = get_tool_info(tool_name)
+                        tool_info = tools_registry.get_tool_info(tool_name)
                         if tool_info and "examples" in tool_info:
                             examples = tool_info["examples"]
                             if examples:
@@ -1548,10 +1674,10 @@ The command should directly use the values from the previous output when appropr
             context.append("For GPG password cracking, use gpg2john to extract the hash, then john to crack it.")
         
         # Add Kali tools guidance from extensive_kali_tools if available
-        if KALI_TOOLS_AVAILABLE:
+        if extensive_kali_tools and extensive_kali_tools.KALI_TOOLS_AVAILABLE:
             try:
                 # Get all available Kali tools
-                all_kali_tools = get_all_kali_tools()
+                all_kali_tools = extensive_kali_tools.get_all_kali_tools()
                 
                 # Extract keywords from request
                 keywords = [word.lower() for word in request.split() if len(word) > 3]
@@ -1582,7 +1708,7 @@ The command should directly use the values from the previous output when appropr
                 # Add category-specific tool recommendations
                 for category in relevant_categories:
                     try:
-                        category_tools = get_tools_by_category(category)
+                        category_tools = tools_registry.get_tools_by_category(category)
                         if category_tools and len(category_tools) > 0:
                             # Get up to 3 tools from each category
                             sample_tools = category_tools[:3]
@@ -1749,7 +1875,8 @@ def main():
         THEME = args.theme
     
     # Display ASCII art
-    display_ascii_art()
+    if ascii_art:
+        ascii_art.display()
     
     # Show fancy header if rich is available
     if RICH_AVAILABLE:

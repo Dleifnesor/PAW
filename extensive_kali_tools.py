@@ -10,41 +10,37 @@ import os
 import sys
 from typing import Dict, List, Any, Optional
 
-# Set up import paths for the tools_registry module
-INSTALL_DIR = '/usr/local/share/paw'
+# Get the absolute path of the current script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Add all possible paths to Python path
-paths_to_add = [
-    INSTALL_DIR,
-    os.path.join(INSTALL_DIR, 'lib'),
-    os.path.dirname(os.path.abspath(__file__)),
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')
+# Define possible installation paths
+POSSIBLE_INSTALL_PATHS = [
+    '/usr/local/share/paw',  # System-wide installation
+    os.path.join(SCRIPT_DIR, 'lib'),  # Local development
+    SCRIPT_DIR,  # Current directory
 ]
 
-for path in paths_to_add:
+# Add all possible paths to Python path, avoiding duplicates
+for path in POSSIBLE_INSTALL_PATHS:
     if os.path.exists(path) and path not in sys.path:
         sys.path.insert(0, path)
 
-# Try importing the PAW tools registry module
+# Clear any existing duplicate paths
+sys.path = list(dict.fromkeys(sys.path))
+
+# Try importing required modules with fallbacks
 try:
-    # First try direct import
+    import tools_registry
+except ImportError:
     try:
-        from tools_registry import get_tools_registry, register_tool
+        from lib import tools_registry
     except ImportError:
-        # If that fails, try importing from lib directory
-        try:
-            from lib.tools_registry import get_tools_registry, register_tool
-        except ImportError:
-            print("Error: Could not import PAW tools_registry module.")
-            print("Current Python path:")
-            for path in sys.path:
-                print(f"  - {path}")
-            print("\nMake sure PAW is installed correctly and this script is in the correct directory.")
-            print("You can install PAW by running: bash install.sh")
-            sys.exit(1)
-except Exception as e:
-    print(f"Unexpected error: {e}")
-    sys.exit(1)
+        print("Error: Could not import PAW tools_registry module.")
+        print("Current Python path:")
+        for path in sys.path:
+            print(f"  - {path}")
+        print("\nMake sure PAW is installed correctly.")
+        sys.exit(1)
 
 # Define tool categories
 CATEGORIES = [
@@ -66,6 +62,9 @@ CATEGORIES = [
     "Cryptography",
     "Hardware Hacking"
 ]
+
+# Set availability flag
+KALI_TOOLS_AVAILABLE = True
 
 # Comprehensive list of Kali Linux tools with detailed information
 KALI_TOOLS = [
@@ -504,7 +503,7 @@ def add_extensive_kali_tools(only_show: bool = False) -> List[Dict[str, Any]]:
     Returns:
         List of tools that would be or were added
     """
-    registry = get_tools_registry()
+    registry = tools_registry.get_tools_registry()
     existing_tools = {tool["name"].lower(): tool for tool in registry}
     
     tools_to_add = []
@@ -513,7 +512,7 @@ def add_extensive_kali_tools(only_show: bool = False) -> List[Dict[str, Any]]:
         if tool["name"].lower() not in existing_tools:
             tools_to_add.append(tool)
             if not only_show:
-                register_tool(tool)
+                tools_registry.register_tool(tool)
     
     return tools_to_add
 
@@ -524,7 +523,7 @@ def export_tools(output_file: str) -> None:
     Args:
         output_file: Path to the output JSON file
     """
-    registry = get_tools_registry()
+    registry = tools_registry.get_tools_registry()
     
     with open(output_file, 'w') as f:
         json.dump(registry, f, indent=4)
@@ -542,7 +541,7 @@ def import_tools(input_file: str, only_show: bool = False) -> List[Dict[str, Any
     Returns:
         List of tools that would be or were added
     """
-    registry = get_tools_registry()
+    registry = tools_registry.get_tools_registry()
     existing_tools = {tool["name"].lower(): tool for tool in registry}
     
     with open(input_file, 'r') as f:
@@ -554,7 +553,7 @@ def import_tools(input_file: str, only_show: bool = False) -> List[Dict[str, Any
         if tool["name"].lower() not in existing_tools:
             tools_to_add.append(tool)
             if not only_show:
-                register_tool(tool)
+                tools_registry.register_tool(tool)
     
     return tools_to_add
 
@@ -636,7 +635,7 @@ def main() -> None:
             print("\nAll tools are already registered.")
 
 # Add functions to access tool information
-def get_all_kali_tools():
+def get_all_kali_tools() -> List[Dict[str, Any]]:
     """
     Get all available Kali Linux tools.
     
@@ -645,7 +644,7 @@ def get_all_kali_tools():
     """
     return KALI_TOOLS
 
-def get_tool_categories():
+def get_tool_categories() -> List[str]:
     """
     Get all available tool categories.
     
@@ -654,7 +653,7 @@ def get_tool_categories():
     """
     return CATEGORIES
 
-def get_tools_by_category(category):
+def get_tools_by_category(category: str) -> List[Dict[str, Any]]:
     """
     Get all tools in a specific category.
     
@@ -666,7 +665,7 @@ def get_tools_by_category(category):
     """
     return [tool for tool in KALI_TOOLS if tool["category"].lower() == category.lower()]
 
-def get_tool_info(tool_name):
+def get_tool_info(tool_name: str) -> Optional[Dict[str, Any]]:
     """
     Get detailed information about a specific tool.
     
@@ -681,7 +680,7 @@ def get_tool_info(tool_name):
             return tool
     return None
 
-def search_tools(query):
+def search_tools(query: str) -> List[Dict[str, Any]]:
     """
     Search for tools by name, category, or description.
     
