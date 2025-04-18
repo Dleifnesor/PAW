@@ -16,6 +16,7 @@ import importlib.util
 import re
 import socket
 from typing import List, Dict
+import platform
 
 # Get the absolute path of the current script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -119,6 +120,7 @@ llm_timeout = 600.0
 command_timeout = 600.0
 theme = cyberpunk
 adaptive_mode = false
+use_sudo = false
 """)
             print(f"Created default config at {CONFIG_PATH}")
             config.read(CONFIG_PATH)
@@ -234,6 +236,10 @@ class PAW:
         
         # Get config for adaptive mode
         self.adaptive_mode = config['DEFAULT'].getboolean('adaptive_mode', False)
+        
+        # Check if sudo should be used without prompting (avoid sudo password problems)
+        # Default to False to prevent password prompts
+        self.use_sudo = config['DEFAULT'].getboolean('use_sudo', False)
         
         # Initialize Kali tools if available
         self.kali_tools = None
@@ -781,10 +787,42 @@ class PAW:
                         fixed_command = command.replace(old_ip[0], user_ip)
                         variables['target_ip'] = user_ip
         
+        # Handle sudo password or permissions errors
+        if "sudo: 3 incorrect password attempts" in stderr or "sudo: incorrect password" in stderr:
+            # This happens when password prompts occur and fail
+            if RICH_AVAILABLE:
+                console.print("[bold red]Sudo password authentication failed.[/]")
+                console.print("[bold yellow]Attempting to run the command without sudo.[/]")
+            else:
+                print("\033[1;31m[!] Sudo password authentication failed.\033[0m")
+                print("\033[1;33m[*] Attempting to run the command without sudo.\033[0m")
+            
+            # Remove sudo from the command
+            if command.strip().startswith("sudo "):
+                fixed_command = command.replace("sudo ", "", 1)
+                suggestion = "Running the command without sudo to avoid password prompts."
+                
+                # If this would set use_sudo to False globally
+                self.use_sudo = False
+                return fixed_command, suggestion, variables
+        
+        # Handle permission issues
         elif "permission denied" in stderr.lower() or "privileges" in stderr.lower():
             # Permission issue
-            fixed_command = "sudo " + command
-            suggestion = "This command requires elevated privileges. Added sudo."
+            if self.use_sudo:
+                fixed_command = "sudo " + command if not command.startswith("sudo ") else command
+                suggestion = "This command requires elevated privileges. Added sudo."
+            else:
+                # If sudo is disabled, suggest running as user
+                suggestion = "Permission denied. This command might require elevated privileges, but sudo is disabled."
+                
+                # Suggest alternative approaches for common permission issues
+                if "cannot open" in stderr.lower() and ("/dev/" in command or "/proc/" in command or "/sys/" in command):
+                    suggestion += " Consider using alternative tools that don't require system access."
+                elif "device or resource busy" in stderr.lower():
+                    suggestion += " The resource might be in use by another process."
+                
+                fixed_command = command  # Keep command unchanged if sudo is disabled
         
         elif "Syntax error" in stderr:
             # Syntax error - try to fix basic issues
@@ -804,186 +842,51 @@ class PAW:
         
         return fixed_command, suggestion, variables
     
-    def execute_command(self, command, variables=None):
-        """Execute a shell command and return the output."""
-        if variables is None:
-            variables = {}
-            
-        # Apply variable substitution
-        if variables:
-            original_command = command
-            command = self.substitute_variables(command, variables)
-            if command != original_command:
-                if RICH_AVAILABLE:
-                    console.print(f"[dim]Substituted command:[/] {command}")
+    def execute_command(self, command, shell=True):
+        """Execute a shell command and return the output.
         
-        try:
-            logger.info(f"Executing command: {command}")
+        Args:
+            command (str): The command to execute
+            shell (bool): Whether to execute the command through the shell
             
-            # Log the command
-            if LOG_COMMANDS:
-                with open(self.log_file, 'a') as f:
-                    f.write(f"\n[COMMAND] {datetime.now()}: {command}\n")
+        Returns:
+            tuple: (stdout, stderr, exit_code)
+        """
+        if not command:
+            return "", "", 0
             
-            # Define default command timeout (3 minutes, or configurable)
-            command_timeout = float(config['DEFAULT'].get('command_timeout', '600.0'))
-            
-            # Show fancy indicator if rich is available
-            if RICH_AVAILABLE:
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[bold yellow]Executing...[/]"),
-                    TimeElapsedColumn(),
-                    console=console,
-                    transient=False
-                ) as progress:
-                    task = progress.add_task("Executing...", total=None)
-                    
-                    # Execute the command
-                    process = subprocess.Popen(
-                        command,
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True
-                    )
-                    
-                    # Wait for command with timeout
-                    start_time = time.time()
-                    stdout_data = []
-                    stderr_data = []
-                    
-                    # Set up non-blocking I/O
-                    import fcntl
-                    import os
-                    import select
-                    
-                    # Make stdout and stderr non-blocking
-                    for f in [process.stdout, process.stderr]:
-                        flags = fcntl.fcntl(f.fileno(), fcntl.F_GETFL)
-                        fcntl.fcntl(f.fileno(), fcntl.F_SETFL, flags | os.O_NONBLOCK)
-                    
-                    # Poll for results or timeout
-                    while process.poll() is None:
-                        # Check if we need to allow user to abort
-                        elapsed = time.time() - start_time
-                        if elapsed > 10:  # After 10 seconds, show abort option
-                            progress.stop()
-                            if Confirm.ask(f"Command running for {int(elapsed)}s. Abort?", default=False):
-                                process.kill()
-                                console.print("[bold red]Command aborted by user[/]")
-                                return {
-                                    "exit_code": -1,
-                                    "stdout": "".join(stdout_data),
-                                    "stderr": "Command aborted by user after timeout",
-                                    "command": command,
-                                    "variables": variables
-                                }
-                            # Resume progress and reset timer to wait another 10s before asking again
-                            progress.start()
-                            start_time = time.time()
-                        
-                        # Check for output
-                        readable, _, _ = select.select([process.stdout, process.stderr], [], [], 0.5)
-                        for stream in readable:
-                            line = stream.readline()
-                            if line:
-                                if stream == process.stdout:
-                                    stdout_data.append(line)
-                                else:
-                                    stderr_data.append(line)
-                        
-                        # Check for timeout
-                        if time.time() - start_time > command_timeout:
-                            process.kill()
-                            console.print(f"[bold red]Command timed out after {command_timeout} seconds[/]")
-                            return {
-                                "exit_code": -1,
-                                "stdout": "".join(stdout_data),
-                                "stderr": f"Command timed out after {command_timeout} seconds",
-                                "command": command,
-                                "variables": variables
-                            }
-                    
-                    # Get any remaining output
-                    stdout, stderr = process.communicate()
-                    stdout_data.append(stdout)
-                    stderr_data.append(stderr)
-                    
-                    # Combine output
-                    stdout = "".join(stdout_data)
-                    stderr = "".join(stderr_data)
-            else:
-                # Execute the command with timeout for non-rich UI
+        # Handle sudo requirements but preserve explicit sudo if user already included it
+        if not command.startswith("sudo "):
+            command = self.handle_sudo(command)
+        
+        # For sudo commands, run them interactively to allow password entry
+        if command.startswith("sudo "):
+            try:
+                # Use a separate process to allow interactive password prompts
+                print(f"\nExecuting: {command}")
+                process = subprocess.run(
+                    command,
+                    shell=shell,
+                    text=True,
+                    capture_output=False  # Don't capture output to allow terminal interaction
+                )
+                return "", "", process.returncode
+            except Exception as e:
+                return "", str(e), 1
+        else:
+            # For non-sudo commands, capture output as before
+            try:
                 process = subprocess.Popen(
                     command,
-                    shell=True,
+                    shell=shell,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True
                 )
-                
-                print(f"\033[1;33m[*] Executing (press Ctrl+C to abort)...\033[0m")
-                
-                try:
-                    stdout, stderr = process.communicate(timeout=command_timeout)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    print(f"\033[1;31m[!] Command timed out after {command_timeout} seconds\033[0m")
-                    return {
-                        "exit_code": -1,
-                        "stdout": "",
-                        "stderr": f"Command timed out after {command_timeout} seconds",
-                        "command": command,
-                        "variables": variables
-                    }
-            
-            # Log the output
-            if LOG_COMMANDS:
-                with open(self.log_file, 'a') as f:
-                    f.write(f"[STDOUT]\n{stdout}\n")
-                    if stderr:
-                        f.write(f"[STDERR]\n{stderr}\n")
-            
-            # Extract variables from command output if command was successful
-            if process.returncode == 0:
-                new_variables = self.extract_variables(stdout)
-                # Merge with existing variables, preserving existing ones if there's overlap
-                for key, value in new_variables.items():
-                    if key not in variables:
-                        variables[key] = value
-            
-            return {
-                "exit_code": process.returncode,
-                "stdout": stdout,
-                "stderr": stderr,
-                "command": command,
-                "variables": variables
-            }
-            
-        except KeyboardInterrupt:
-            # Handle keyboard interrupt
-            if RICH_AVAILABLE:
-                console.print("[bold red]Command interrupted by user[/]")
-            else:
-                print("\n\033[1;31m[!] Command interrupted by user\033[0m")
-                
-            return {
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": "Command was interrupted by user",
-                "command": command,
-                "variables": variables
-            }
-        except Exception as e:
-            logger.error(f"Error executing command: {e}")
-            return {
-                "exit_code": 1,
-                "stdout": "",
-                "stderr": str(e),
-                "command": command,
-                "variables": variables
-            }
+                stdout, stderr = process.communicate()
+                return stdout, stderr, process.returncode
+            except Exception as e:
+                return "", str(e), 1
     
     def display_plan(self, plan):
         """Display the action plan with fancy formatting."""
@@ -1194,7 +1097,7 @@ Make sure the alternative is genuinely different and appropriate for the task at
                     if ' ' in gpg_file and not (gpg_file.startswith('"') or gpg_file.startswith("'")):
                         gpg_file = f'"{gpg_file}"'
                     
-                    fixed_cmd = f"gpg2john {gpg_file} > hash.txt"
+                    fixed_cmd = f"sudo gpg2john {gpg_file} > hash.txt"
                     suggestion = "Using gpg2john to extract the hash from the GPG file for cracking"
                     if RICH_AVAILABLE:
                         retry = Confirm.ask(f"Try using gpg2john on {gpg_file}?", default=True)
@@ -1207,6 +1110,69 @@ Make sure the alternative is genuinely different and appropriate for the task at
                         result = self.execute_command(fixed_cmd, updated_vars)
                         self.display_result(result, command_index, total_commands)
                         return result, updated_vars
+                        
+        # Special handling for GPG decryption failures 
+        if "gpg: gcry_kdf_derive failed" in result["stderr"] or "gpg: decryption failed" in result["stderr"] or ("gpg" in cmd and "encrypted" in result["stderr"]):
+            if RICH_AVAILABLE:
+                console.print("[bold yellow]GPG decryption failed - the file is encrypted with a password.[/]")
+                console.print("[bold cyan]Switching to John the Ripper for password cracking...[/]")
+            else:
+                print("\033[1;33m[*] GPG decryption failed - the file is encrypted with a password.\033[0m")
+                print("\033[1;36m[*] Switching to John the Ripper for password cracking...\033[0m")
+            
+            # Extract the GPG file path from the command
+            gpg_file_match = re.search(r'(/[^\s]+\.gpg|\w+\.gpg|/home/[^\s]+\.gpg)', cmd)
+            gpg_file = gpg_file_match.group(0) if gpg_file_match else None
+            
+            if not gpg_file and 'request' in variables:
+                # Try to extract the filename from the request with regex
+                matches = re.findall(r'([^\s]+\.(?:tar\.)?gpg)', str(variables['request']))
+                if matches:
+                    gpg_file = matches[0]
+            
+            if gpg_file:
+                # Properly quote the file path if it contains spaces
+                if ' ' in gpg_file and not (gpg_file.startswith('"') or gpg_file.startswith("'")):
+                    gpg_file = f'"{gpg_file}"'
+                
+                # Create a workflow of commands for John the Ripper
+                fixed_cmd = f"sudo gpg2john {gpg_file} > hash.txt"
+                suggestion = "Using John the Ripper workflow to crack the GPG password"
+                
+                if RICH_AVAILABLE:
+                    retry = Confirm.ask(f"Try cracking the password with John the Ripper?", default=True)
+                else:
+                    print(f"\033[1;33m[*] Suggested fix: Use John the Ripper to crack the password\033[0m")
+                    retry = input("\033[1;35m[?] Try this approach? (y/n): \033[0m").strip().lower()
+                    retry = retry == "" or retry == "y"
+                
+                if retry:
+                    # Execute gpg2john first
+                    result = self.execute_command(fixed_cmd, updated_vars)
+                    self.display_result(result, command_index, total_commands)
+                    
+                    # If successful, run john on the hash file
+                    if result["exit_code"] == 0:
+                        john_cmd = "sudo john hash.txt"
+                        if RICH_AVAILABLE:
+                            console.print("[bold green]Hash extraction successful. Running John the Ripper to crack the password...[/]")
+                        else:
+                            print("\033[1;32m[*] Hash extraction successful. Running John the Ripper to crack the password...\033[0m")
+                        
+                        result = self.execute_command(john_cmd, updated_vars)
+                        self.display_result(result, command_index, total_commands)
+                        
+                        # Show the results
+                        show_cmd = "sudo john --show hash.txt"
+                        if RICH_AVAILABLE:
+                            console.print("[bold green]Displaying cracked password(s)...[/]")
+                        else:
+                            print("\033[1;32m[*] Displaying cracked password(s)...\033[0m")
+                        
+                        result = self.execute_command(show_cmd, updated_vars)
+                        self.display_result(result, command_index, total_commands)
+                    
+                    return result, updated_vars
 
         # Special handling for file not found errors
         if "No such file" in result["stderr"] or "not found" in result["stderr"]:
@@ -1237,6 +1203,15 @@ Make sure the alternative is genuinely different and appropriate for the task at
         alt_cmd, alt_explanation = self.suggest_alternative_command(cmd, result["stderr"], variables)
         has_alt_cmd = alt_cmd is not None
         if has_alt_cmd:
+            # Special handling for GPG password decryption
+            if ".gpg" in cmd and ("decrypt" in variables.get('request', '') or "password" in variables.get('request', '')):
+                gpg_file_match = re.search(r'(/[^\s]+\.gpg|\w+\.gpg|/home/[^\s]+\.gpg)', cmd)
+                gpg_file = gpg_file_match.group(0) if gpg_file_match else None
+                
+                if gpg_file:
+                    alt_cmd = f"sudo gpg2john {gpg_file} > hash.txt && sudo john hash.txt && sudo john --show hash.txt"
+                    alt_explanation = "Extracting the password hash from the GPG file and attempting to crack it with John the Ripper"
+            
             options.append(("Try a different approach", alt_cmd, alt_explanation))
             
         # Option 3: Skip this command
@@ -1458,10 +1433,8 @@ The command should directly use the values from the previous output when appropr
         
         # Only return the first command if approved
         if commands and explanations:
-            # Ensure command has sudo prefix
+            # Preserve the command as-is, including sudo if present
             command = commands[0]
-            if not command.strip().startswith("sudo "):
-                command = f"sudo {command}"
             
             if self.display_single_command(command, explanations[0], 1, len(commands)):
                 return [command], self.adaptive_mode
@@ -1639,6 +1612,30 @@ The command should directly use the values from the previous output when appropr
                         target = word
                         break
                 suggested_commands = [f"sudo nmap -sS -p- {target}"]
+            elif any(term in request.lower() for term in ["password", "decrypt", "crack"]):
+                # Check if it's for a GPG file
+                gpg_file = None
+                for word in request.split():
+                    if ".gpg" in word:
+                        gpg_file = word
+                        break
+                
+                if gpg_file or "gpg" in request.lower():
+                    # If no specific GPG file is mentioned, use a placeholder
+                    if not gpg_file:
+                        gpg_file = "/path/to/file.gpg"
+                    
+                    suggested_commands = [
+                        f"sudo gpg2john {gpg_file} > hash.txt",
+                        "sudo john hash.txt",
+                        "sudo john --show hash.txt"
+                    ]
+                else:
+                    # General password cracking guidance
+                    suggested_commands = [
+                        "sudo john --format=raw-md5 hash.txt",
+                        "sudo hashcat -m 0 hash.txt /usr/share/wordlists/rockyou.txt"
+                    ]
             elif extensive_kali_tools and extensive_kali_tools.KALI_TOOLS_AVAILABLE:
                 # Try to get example commands from Kali tools database
                 for tool_name in relevant_tools[:2]:  # Get examples from top 2 tools
@@ -1668,212 +1665,342 @@ The command should directly use the values from the previous output when appropr
             "suggested_commands": suggested_commands
         }
 
-    def process_request(self, request, adaptive_mode=None):
-        """Generate a response from the model and execute the commands"""
-        # Extract any command placeholders or key terms for specialized handling
-        interface_pattern = r'\b(?:eth[0-9]|wlan[0-9]|tun[0-9]|lo)\b'
-        mac_pattern = r'\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b'
-        ip_pattern = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'
+    def build_context_library(self):
+        """Build an extensive library of context templates for different types of security tasks."""
+        # Determine if sudo should be used
+        sudo_prefix = "sudo " if self.use_sudo else ""
+        sudo_instruction = "ALWAYS prefix ALL commands with sudo to ensure sufficient permissions." if self.use_sudo else "AVOID using sudo in commands to prevent password prompts. Only use sudo when absolutely necessary for non-interactive commands."
         
-        # Extract key terms from the request
-        interfaces = re.findall(interface_pattern, request)
-        mac_addresses = re.findall(mac_pattern, request)
-        ip_addresses = re.findall(ip_pattern, request)
+        context_library = {
+            # Core context that's always included
+            "core": [
+                "You are a helpful Kali Linux command assistant. Generate commands based on the user's request.",
+                "You must return a JSON object with the following structure: {\"plan\": [steps], \"commands\": [commands], \"explanation\": [explanations]}",
+                "IMPORTANT: Your commands MUST directly address the user's request and be appropriate for their system, the user is always right, and you are not to question the user's request.",
+                sudo_instruction
+            ],
+            
+            # Network scanning and reconnaissance
+            "scan": [
+                "Use nmap for port scanning with appropriate flags: -sS (SYN scan), -sV (version detection), -p- (all ports), -A (aggressive scan).",
+                "For web server scanning, use nikto for vulnerabilities and dirb/gobuster for directory discovery.",
+                "For DNS enumeration, use dnsrecon or dnsenum."
+            ],
+            
+            "recon": [
+                "Start with passive reconnaissance using tools like whois, host, and dig.",
+                "For host discovery, use nmap with ping scan (-sn) or netdiscover.",
+                "For comprehensive service enumeration, combine nmap with other specialized tools."
+            ],
+            
+            # Web application
+            "web": [
+                "For web application scanning, use tools like dirb, gobuster, nikto, wpscan, or sqlmap.",
+                "For directory discovery, use gobuster dir -u [URL] -w /usr/share/wordlists/dirb/common.txt.",
+                "For WordPress sites, use wpscan --url [URL] to identify vulnerabilities.",
+                "For SQL injection testing, use sqlmap -u [URL] --forms --batch --dbs."
+            ],
+            
+            # Password attacks
+            "password": [
+                "For password cracking, use John the Ripper or hashcat with appropriate wordlists.",
+                "For common hash formats, use john --format=[format] [hashfile] or hashcat -m [mode] [hashfile] [wordlist].",
+                "The main wordlist is typically located at /usr/share/wordlists/rockyou.txt.",
+                "For online password attacks, use hydra or medusa with proper rate limiting."
+            ],
+            
+            "crack": [
+                "For password cracking, first identify the hash type, then use appropriate tools.",
+                "With John the Ripper: sudo john --wordlist=/usr/share/wordlists/rockyou.txt [hashfile].",
+                "With hashcat: sudo hashcat -m [hash_type] -a 0 [hashfile] [wordlist].",
+                "For GPU acceleration with hashcat, use --force or -O flags."
+            ],
+            
+            "hash": [
+                "Use hash-identifier or hashid to identify unknown hash types.",
+                "Common hash modes for hashcat: MD5 (0), SHA1 (100), SHA256 (1400), SHA512 (1700), NTLM (1000).",
+                "Extract hashes from files using tools like pdf2john, zip2john, office2john before cracking."
+            ],
+            
+            # Wireless attacks
+            "wifi": [
+                "For WiFi scanning, use airmon-ng to put interface in monitor mode, then airodump-ng to capture traffic.",
+                "For WPA handshake capturing: sudo airmon-ng start [interface]; sudo airodump-ng [monitor-interface] --bssid [target_MAC] -c [channel] -w [output_file].",
+                "Crack captured handshakes with: sudo aircrack-ng [capture_file] -w [wordlist]."
+            ],
+            
+            "wireless": [
+                "Start with sudo airmon-ng check kill to stop processes that could interfere.",
+                "Put interface in monitor mode: sudo airmon-ng start [interface].",
+                "Capture traffic: sudo airodump-ng [monitor-interface].",
+                "For WPS attacks, consider using reaver or bully."
+            ],
+            
+            # Exploitation
+            "exploit": [
+                "Use Metasploit Framework for exploitation: sudo msfconsole.",
+                "Search for exploits with: search [vulnerability/CVE].",
+                "Set up with: use [exploit_path]; set RHOSTS [target]; set payload [payload]; run.",
+                "For manual exploitation, research the specific CVE and use appropriate tools."
+            ],
+            
+            "metasploit": [
+                "Start Metasploit with: sudo msfconsole.",
+                "Find exploits: search type:exploit platform:[platform] cve:[year].",
+                "Multi-handler for payloads: use multi/handler; set payload [payload]; set LHOST [your_IP]; run.",
+                "Database operations: db_nmap, hosts, services commands for tracking."
+            ],
+            
+            # Privilege escalation
+            "privilege": [
+                "For Linux privilege escalation enumeration, use LinPEAS or LinEnum scripts.",
+                "For Windows, use WinPEAS or PowerUp.",
+                "Check for SUID binaries: sudo find / -perm -u=s -type f 2>/dev/null.",
+                "Investigate cron jobs, sudo rights, kernel exploits, and writable service files."
+            ],
+            
+            "escalation": [
+                "Check for sudo misconfiguration: sudo -l.",
+                "Look for exploitable services: ps aux | grep root.",
+                "Search for kernel exploits based on kernel version: uname -a.",
+                "Monitor running processes with pspy."
+            ],
+            
+            # Forensics and analysis
+            "forensics": [
+                "Use tools like autopsy, foremost, or photorec for file recovery.",
+                "For memory analysis, use volatility framework.",
+                "For disk imaging, use dd or dcfldd.",
+                "For log analysis, use tools like grep, awk, and ELK stack."
+            ],
+            
+            "analysis": [
+                "For network traffic analysis, use wireshark or tshark.",
+                "For static file analysis, use tools like binwalk, strings, exiftool.",
+                "For malware analysis, consider REMnux distribution and tools like radare2.",
+                "For pcap analysis: tshark -r [capture_file] -Y [display_filter]."
+            ],
+            
+            # Steganography
+            "stego": [
+                "For steganography detection, use stegdetect or stegspy.",
+                "For extraction, use steghide: steghide extract -sf [file].",
+                "For analysis, use binwalk or foremost to extract hidden data.",
+                "For LSB steganography, consider tools like zsteg or LSBSteg."
+            ],
+            
+            # Social engineering
+            "social": [
+                "For phishing attacks, use tools like Social-Engineer Toolkit (setoolkit).",
+                "For creating malicious documents, use tools like msfvenom.",
+                "For website cloning: setoolkit -> Social-Engineering Attacks -> Website Attack Vectors -> Credential Harvester.",
+                "Always set up proper logging and notification for collected credentials."
+            ],
+            
+            # Post-exploitation
+            "post": [
+                "For data exfiltration, consider encryption and compression.",
+                "For persistence, analyze cron jobs, startup services, or scheduled tasks.",
+                "For lateral movement, use tools like proxychains, port forwarding, or SSH tunneling.",
+                "For covering tracks, clear logs with: sudo rm -rf /var/log/*."
+            ],
+            
+            # MAC address operations
+            "mac": [
+                "For MAC address changes, first check the current MAC address with ifconfig or ip link.",
+                "Bring interface down: sudo ip link set dev [interface] down.",
+                "Change MAC: sudo macchanger -r [interface] or sudo ip link set dev [interface] address XX:XX:XX:XX:XX:XX.",
+                "Bring interface back up: sudo ip link set dev [interface] up."
+            ],
+            
+            # Cryptography 
+            "decrypt": [
+                "For encrypted files, first identify the encryption type.",
+                "For GPG files, use gpg2john to extract the hash, then crack with John the Ripper.",
+                "For encrypted disks, use cryptsetup for LUKS containers.",
+                "For encrypted archives, use fcrackzip for ZIP or john for other formats."
+            ],
+            
+            "gpg": [
+                "For GPG password cracking, use this workflow with John the Ripper:",
+                f"1. Extract the hash: {sudo_prefix}gpg2john [gpg_file] > hash.txt",
+                f"2. Crack the password: {sudo_prefix}john hash.txt",
+                f"3. Display results: {sudo_prefix}john --show hash.txt",
+                "DO NOT attempt to use gpg --decrypt as the primary approach for password recovery."
+            ],
+            
+            # Network manipulation
+            "proxy": [
+                "For proxy chains, use: proxychains [command].",
+                "Configure proxychains in /etc/proxychains.conf.",
+                "For SOCKS proxy with SSH: ssh -D 1080 user@host.",
+                "For HTTP proxy with Burp Suite, set up proxy on 127.0.0.1:8080."
+            ],
+            
+            "vpn": [
+                "For OpenVPN connections: sudo openvpn --config [config_file].",
+                "For WireGuard: sudo wg-quick up [interface].",
+                "Check connection status with: ip addr show."
+            ],
+            
+            # System and file operations
+            "file": [
+                "For file operations, use standard Linux commands: ls, cat, grep, find.",
+                "For file recovery: sudo foremost -i [device] -o [output_dir].",
+                "For secure deletion: sudo shred -zvu -n 10 [file].",
+                "For disk usage analysis: sudo du -sh /* | sort -hr."
+            ],
+            
+            # Vulnerability assessment
+            "vulnerability": [
+                "For vulnerability scanning, use OpenVAS or Nessus.",
+                "For web vulnerabilities, use OWASP ZAP or Burp Suite.",
+                "For system auditing, use Lynis: sudo lynis audit system.",
+                "For network-wide scanning: sudo nmap --script vuln [target]."
+            ],
+            
+            "cve": [
+                "Search for CVEs with searchsploit or from the Exploit-DB website.",
+                "Use searchsploit [keywords] to find exploits locally.",
+                "Update the database with: sudo searchsploit -u.",
+                "Use --examine option to examine exploit code before using it."
+            ],
+            
+            # Network services
+            "ftp": [
+                "For FTP enumeration: nmap -p 21 --script ftp-* [target].",
+                "For anonymous access: ftp [target] (username: anonymous).",
+                "For brute forcing: hydra -l [user] -P [wordlist] [target] ftp."
+            ],
+            
+            "ssh": [
+                "For SSH enumeration: nmap -p 22 --script ssh-* [target].",
+                "For key-based auth: ssh -i [key_file] [user]@[target].",
+                "For brute forcing: hydra -l [user] -P [wordlist] [target] ssh."
+            ],
+            
+            "smb": [
+                "For SMB enumeration: nmap -p 445 --script smb-* [target].",
+                "List shares: smbclient -L [target].",
+                "Connect to share: smbclient //[target]/[share].",
+                "For null sessions: smbclient -N //[target]/[share]."
+            ],
+            
+            # OSINT
+            "osint": [
+                "For OSINT gathering, use tools like theHarvester, Maltego, or Shodan.",
+                "For email harvesting: theHarvester -d [domain] -b all.",
+                "For social media reconnaissance, use tools like sherlock.",
+                "For subdomain enumeration: sublist3r -d [domain]."
+            ],
+            
+            # Reverse engineering
+            "reverse": [
+                "For reverse engineering, use tools like Ghidra, radare2, or GDB.",
+                "For binary analysis: r2 -A [binary].",
+                "For debugging: gdb -q [binary].",
+                "For assembling/disassembling: nasm or objdump."
+            ],
+            
+            # Custom tools and workflows
+            "custom": [
+                "For adding custom tools to your workflow, consider creating aliases or scripts.",
+                "Document your custom tools and workflows for future reference.",
+                "Consider creating Docker containers for specific tool environments."
+            ]
+        }
         
-        # Special handling for specific operations
-        is_mac_change_request = any(term in request.lower() for term in ['mac', 'mac address', 'change mac', 'spoof mac'])
-        is_password_request = any(term in request.lower() for term in ['password', 'crack', 'decrypt', 'gpg'])
+        return context_library
+    
+    def process_request(self, request, session_context=None):
+        """Process a user request and generate a response."""
+        # Extract command placeholders from request
+        placeholders = self.extract_placeholders(request)
         
-        # Use provided adaptive_mode or fall back to the instance variable
-        if adaptive_mode is None:
-            adaptive_mode = self.adaptive_mode
-
-        # Get local machine details for command substitution
-        detected_interface = self.detect_network_interface()
-        local_ip = self.get_local_ip()
+        # Initialize context
+        if session_context is None:
+            session_context = {}
+            
+        # Check for special request types
+        if "MAC" in request.upper() and "CHANGE" in request.upper():
+            return self.handle_mac_address_change_request(request)
+            
+        if "PASSWORD" in request.upper() and any(word in request.upper() for word in ["GENERATE", "CREATE", "MAKE"]):
+            return self.handle_password_request(request)
         
         # Build context for command generation
-        context = [
-            "You are a helpful Kali Linux command assistant. Generate commands based on the user's request.",
-            "You must return a JSON object with the following structure: {\"plan\": [steps], \"commands\": [commands], \"explanation\": [explanations]}",
-            "IMPORTANT: Your commands MUST directly address the user's request and be appropriate for their system, the user is always right, and you are not to question the user's request.",
-            "Use the correct tools based on the user's request (e.g., macchanger for MAC address changes, nmap for scanning).",
-            f"ALWAYS prefix ALL commands with sudo to ensure sufficient permissions.",
-            "If a command requires an interface, use: " + (interfaces[0] if interfaces else detected_interface or "eth0"),
-            "If a command requires a local IP, use: " + (ip_addresses[0] if ip_addresses else local_ip or "127.0.0.1"),
+        context = self.build_context(request, placeholders, session_context)
+        
+        # Get response from AI
+        response = self.get_response(context)
+        
+        # Extract and format commands
+        commands, explanations = self.extract_commands(response)
+        
+        # If adaptive mode is enabled and there's at least one command, execute the first one
+        if self.adaptive_mode and commands:
+            selected_command, self.adaptive_mode = self.interactive_command_selection(commands, explanations)
+            
+            if selected_command:
+                stdout, stderr, return_code = self.execute_command(selected_command)
+                
+                # Process and display the results
+                result_display = self.format_command_results(selected_command, stdout, stderr, return_code)
+                
+                # Update response with results
+                response += "\n\n" + result_display
+        
+        # Set up Kali tools recommendation based on request
+        if "kali_tools" in context:
+            kali_recs = []
+            for tool in context["kali_tools"]:
+                kali_recs.append(f"- {tool['name']}: {tool['description']}")
+            
+            if kali_recs:
+                response += "\n\nRecommended Kali Tools:\n" + "\n".join(kali_recs)
+        
+        return response
+
+    def handle_sudo(self, command):
+        """Determine whether to apply or remove the sudo prefix.
+        
+        Args:
+            command: The command to check
+            
+        Returns:
+            str: Command with appropriate sudo prefix
+        """
+        if not command:
+            return command
+            
+        command = command.strip()
+        
+        # If the command already has sudo, respect the user's intention
+        if command.startswith("sudo "):
+            return command
+            
+        # Common commands that typically don't need sudo
+        safe_commands = [
+            "ls", "cd", "pwd", "echo", "cat", "grep", "find", "which", "whereis",
+            "man", "info", "help", "history", "clear", "exit", "logout", "whoami",
+            "id", "hostname", "uname", "ifconfig", "ip", "netstat", "ss", "ps",
+            "top", "htop", "free", "df", "du", "date", "cal", "uptime", "w", "finger",
+            "wget", "curl", "ping", "traceroute", "dig", "nslookup", "whois",
+            "ssh", "scp", "sftp", "telnet", "nc", "ncat", "python", "python3", "pip", "pip3"
         ]
         
-        # Add Kali tools guidance from extensive_kali_tools if available
-        if extensive_kali_tools and extensive_kali_tools.KALI_TOOLS_AVAILABLE:
-            try:
-                # Get all available Kali tools
-                all_kali_tools = extensive_kali_tools.get_all_kali_tools()
-                
-                # Extract keywords from request
-                keywords = [word.lower() for word in request.split() if len(word) > 3]
-                
-                # Find relevant tool categories based on request
-                relevant_categories = set()
-                for keyword in keywords:
-                    # Common category mappings
-                    if any(term in keyword for term in ["network", "scan", "port", "discover"]):
-                        relevant_categories.add("Information Gathering")
-                    elif any(term in keyword for term in ["vuln", "exploit", "attack"]):
-                        relevant_categories.add("Vulnerability Analysis")
-                        relevant_categories.add("Exploitation Tools")
-                    elif any(term in keyword for term in ["web", "http", "site"]):
-                        relevant_categories.add("Web Application Analysis")
-                    elif any(term in keyword for term in ["password", "crack", "hash"]):
-                        relevant_categories.add("Password Attacks")
-                    elif any(term in keyword for term in ["wifi", "wireless"]):
-                        relevant_categories.add("Wireless Attacks")
-                
-                # If no specific categories identified, suggest some based on common tasks
-                if not relevant_categories:
-                    relevant_categories = {"Information Gathering", "Vulnerability Analysis"}
-                
-                # Build tool recommendations for context
-                tool_recommendations = []
-                
-                # Add category-specific tool recommendations
-                for category in relevant_categories:
-                    try:
-                        category_tools = tools_registry.get_tools_by_category(category)
-                        if category_tools and len(category_tools) > 0:
-                            # Get up to 3 tools from each category
-                            sample_tools = category_tools[:3]
-                            
-                            # Add category header
-                            tool_recommendations.append(f"\nFor {category}, consider these tools:")
-                            
-                            # Add details for each tool
-                            for tool in sample_tools:
-                                tool_name = tool.get("name", "")
-                                description = tool.get("description", "")
-                                common_usage = tool.get("common_usage", "")
-                                examples = tool.get("examples", [])
-                                
-                                # Add tool details
-                                tool_recommendations.append(f"- {tool_name}: {description}")
-                                tool_recommendations.append(f"  Usage: {common_usage}")
-                                
-                                # Add 1-2 examples if available
-                                if examples and len(examples) > 0:
-                                    if isinstance(examples[0], dict):
-                                        # New format: list of dictionaries with description and command
-                                        for i, example in enumerate(examples[:2]):
-                                            tool_recommendations.append(f"  Example: {example.get('command')} - {example.get('description')}")
-                                    else:
-                                        # Old format: list of example command strings
-                                        for i, example in enumerate(examples[:2]):
-                                            tool_recommendations.append(f"  Example: {example}")
-                    except Exception as e:
-                        logger.error(f"Error getting tools for category {category}: {e}")
-                
-                # Add tool recommendations to context if any were found
-                if tool_recommendations:
-                    context.append("\nRECOMMENDED KALI LINUX TOOLS FOR THIS REQUEST:")
-                    context.extend(tool_recommendations)
-                    
-                    # Add reminder to use these tools
-                    context.append("\nIMPORTANT: Please use the appropriate tools from the list above when generating commands.")
-            except Exception as e:
-                logger.error(f"Error loading Kali tools information: {e}")
-                
-        # Generate the response
-        response = self.generate_llm_response("\n".join(context) + "\n\nRequest: " + request)
-        if "error" in response:
-            if RICH_AVAILABLE:
-                console.print(f"[bold red]{response['error']}[/]")
-            else:
-                print(f"\033[1;31m[!] {response['error']}\033[0m")
-            return response
+        # Check if the command starts with any of the safe commands
+        command_parts = command.split()
+        if not command_parts:
+            return command
+            
+        base_command = command_parts[0]
         
-        try:
-            # Extract the plan, commands, and explanations
-            plan = response.get("plan", ["Execute the requested task"])
-            commands = response.get("commands", [])
+        # If self.use_sudo is True and the command isn't a safe command, apply sudo
+        if self.use_sudo and base_command not in safe_commands:
+            return f"sudo {command}"
             
-            # Ensure all commands have sudo prefix
-            for i in range(len(commands)):
-                if commands[i] and not commands[i].strip().startswith("sudo "):
-                    commands[i] = f"sudo {commands[i]}"
-            
-            explanations = response.get("explanation", [])
-
-            # Make sure explanations match commands in length
-            if len(explanations) < len(commands):
-                explanations.extend(["Execute the command"] * (len(commands) - len(explanations)))
-            
-            # Validate that the commands match the user's intent
-            validation = self.validate_commands_for_prompt(request, commands, explanations)
-            
-            # If validation suggests improvements, show them to the user
-            if validation.get("suggested_commands") and not validation.get("is_valid"):
-                logger.info(f"Command validation suggested improvements: {validation['feedback']}")
-                print(f"\n\033[93mValidation feedback: {validation['feedback']}\033[0m")
-                print("\033[93mSuggested commands:\033[0m")
-                for i, cmd in enumerate(validation.get("suggested_commands", [])):
-                    print(f"\033[93m{i+1}. {cmd}\033[0m")
-                print("\033[93mConsider using these commands instead.\033[0m\n")
-            
-            # Display the plan
-            self.display_plan(plan)
-            
-            # If we have commands, display and execute them
-            if commands:
-                # Display the commands with their explanations
-                self.display_commands(commands, explanations)
-                
-                # If in adaptive mode, let the user select commands one by one
-                if adaptive_mode:
-                    # Handle commands one at a time, generating follow-up commands
-                    variables = {"request": request}
-                    selected_commands, _ = self.interactive_command_selection(commands, explanations)
-                    
-                    for i, cmd in enumerate(selected_commands, 1):
-                        # Execute the command and capture its output
-                        result = self.execute_command(cmd, variables)
-                        self.display_result(result, i, len(selected_commands))
-                        
-                        # Update variables with any values extracted from the output
-                        variables.update(result.get("variables", {}))
-                else:
-                    # Execute all commands in sequence with y/n confirmation
-                    variables = {"request": request}
-                    for i, (cmd, explanation) in enumerate(zip(commands, explanations), 1):
-                        if self.display_single_command(cmd, explanation, i, len(commands)):
-                            # Execute the command
-                            result = self.execute_command(cmd, variables)
-                            self.display_result(result, i, len(commands))
-                            
-                            # If command failed and we need to handle it
-                            if result["exit_code"] != 0:
-                                result, variables = self.handle_failed_command(cmd, result, variables, i, len(commands))
-                            
-                            # Update variables with any values extracted from the output
-                            variables.update(result.get("variables", {}))
-                        else:
-                            # User chose not to execute this command
-                            if RICH_AVAILABLE:
-                                console.print(f"[yellow]Skipping command: {cmd}[/]")
-                            else:
-                                print(f"\033[1;33m[*] Skipping command: {cmd}\033[0m")
-            else:
-                # No commands were generated
-                if RICH_AVAILABLE:
-                    console.print("[bold yellow]No commands were generated for this request.[/]")
-                else:
-                    print("\033[1;33m[!] No commands were generated for this request.\033[0m")
-            
-            return response
-        except Exception as e:
-            logger.error(f"Failed to process response: {e}")
-            if RICH_AVAILABLE:
-                console.print(f"[bold red]Error: {str(e)}[/]")
-            else:
-                print(f"\033[1;31m[!] Error: {str(e)}\033[0m")
-            return {"error": f"Failed to process response: {e}"}
+        return command
 
 def main():
     parser = argparse.ArgumentParser(description="PAW - Prompt Assisted Workflow for Kali Linux")
