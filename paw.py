@@ -15,14 +15,54 @@ import httpx
 import importlib.util
 import re
 import socket
+from typing import List, Dict
 
-# Add extensive_kali_tools import
+# Get the absolute path of the current script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Define possible installation paths
+POSSIBLE_INSTALL_PATHS = [
+    '/usr/local/share/paw',  # System-wide installation
+    os.path.join(SCRIPT_DIR, 'lib'),  # Local development
+    SCRIPT_DIR,  # Current directory
+]
+
+# Add all possible paths to Python path, avoiding duplicates
+for path in POSSIBLE_INSTALL_PATHS:
+    if os.path.exists(path) and path not in sys.path:
+        sys.path.insert(0, path)
+
+# Clear any existing duplicate paths
+sys.path = list(dict.fromkeys(sys.path))
+
+# Try importing required modules with fallbacks
 try:
-    from extensive_kali_tools import get_all_kali_tools, get_tool_categories, get_tools_by_category, get_tool_info
-    KALI_TOOLS_AVAILABLE = True
+    import tools_registry
 except ImportError:
-    KALI_TOOLS_AVAILABLE = False
-    print("Warning: extensive_kali_tools.py not found or cannot be imported. Some features will be limited.")
+    try:
+        from lib import tools_registry
+    except ImportError:
+        print("Error: Could not import PAW tools_registry module.")
+        print("Current Python path:")
+        for path in sys.path:
+            print(f"  - {path}")
+        print("\nMake sure PAW is installed correctly.")
+        sys.exit(1)
+
+try:
+    import ascii_art
+except ImportError:
+    try:
+        from lib import ascii_art
+    except ImportError:
+        print("Warning: Could not import ascii_art module. Some features may be limited.")
+        ascii_art = None
+
+try:
+    import extensive_kali_tools
+except ImportError:
+    print("Warning: Could not import extensive_kali_tools module. Kali tools functionality will be limited.")
+    extensive_kali_tools = None
 
 # Add rich library for fancy UI
 try:
@@ -39,28 +79,6 @@ try:
 except ImportError:
     print("For a better experience, install rich: pip install rich")
     RICH_AVAILABLE = False
-
-# Add the PAW lib directory to the Python path
-# Try local lib first, then system path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-local_lib_path = os.path.join(current_dir, 'lib')
-if os.path.exists(local_lib_path):
-    sys.path.append(local_lib_path)
-else:
-sys.path.append('/usr/local/share/paw/lib')
-
-try:
-    from ascii_art import display_ascii_art
-    from tools_registry import get_tools_registry
-except ImportError:
-    # Fall back to trying current directory imports
-    try:
-        sys.path.append('.')
-    from ascii_art import display_ascii_art
-    from tools_registry import get_tools_registry
-    except ImportError:
-        print("Error: Could not import required modules. Please make sure you're running from the correct directory.")
-        sys.exit(1)
 
 # Set up logging
 logging.basicConfig(
@@ -85,10 +103,29 @@ else:
     # or the specified file doesn't exist
     if not os.environ.get("PAW_CONFIG") and os.path.exists("./paw-local-config.ini"):
         CONFIG_PATH = "./paw-local-config.ini"
-    config.read(CONFIG_PATH)
-else:
-    logger.error(f"Configuration file not found: {CONFIG_PATH}")
-    sys.exit(1)
+        config.read(CONFIG_PATH)
+    else:
+        # Create default config
+        try:
+            os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+            with open(CONFIG_PATH, 'w') as f:
+                f.write("""[DEFAULT]
+model = qwen2.5-coder:7b
+ollama_host = http://localhost:11434
+explain_commands = true
+log_commands = true
+log_directory = /var/log/paw
+llm_timeout = 600.0
+command_timeout = 600.0
+theme = cyberpunk
+adaptive_mode = false
+""")
+            print(f"Created default config at {CONFIG_PATH}")
+            config.read(CONFIG_PATH)
+        except Exception as e:
+            logger.error(f"Failed to create default config: {e}")
+            logger.error(f"Configuration file not found: {CONFIG_PATH}")
+            sys.exit(1)
 
 MODEL = config['DEFAULT'].get('model', 'qwen2.5-coder:7b')
 OLLAMA_HOST = config['DEFAULT'].get('ollama_host', 'http://localhost:11434')
@@ -184,7 +221,8 @@ def show_fancy_header(title, subtitle=None):
 
 class PAW:
     def __init__(self):
-        self.tools_registry = get_tools_registry()
+        # Initialize tools registry
+        self.tools_registry = tools_registry.get_tools_registry()
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_file = os.path.join(LOG_DIRECTORY, f"paw_session_{self.session_id}.log")
         self.theme = THEMES[THEME]
@@ -197,38 +235,170 @@ class PAW:
         # Get config for adaptive mode
         self.adaptive_mode = config['DEFAULT'].getboolean('adaptive_mode', False)
         
-        # Initialize Kali tools database if available
-        self.init_kali_tools()
-    
+        # Initialize Kali tools if available
+        self.kali_tools = None
+        self.kali_categories = None
+        if extensive_kali_tools:
+            try:
+                self.kali_tools = extensive_kali_tools.get_all_kali_tools()
+                self.kali_categories = extensive_kali_tools.get_tool_categories()
+                print("Kali tools integration initialized successfully.")
+            except Exception as e:
+                print(f"Warning: Could not initialize Kali tools: {e}")
+                self.kali_tools = None
+                self.kali_categories = None
+
     def init_kali_tools(self):
         """Initialize the Kali tools database for use in command generation."""
-        if KALI_TOOLS_AVAILABLE:
+        if extensive_kali_tools:
             try:
                 if RICH_AVAILABLE:
-                    console.print("[bold cyan]Loading Kali Linux tools database...[/]")
+                    console.print("[bold green]Initializing Kali tools database...[/bold green]")
                 else:
-                    print("\033[1;34m[*] Loading Kali Linux tools database...\033[0m")
+                    print("Initializing Kali tools database...")
                 
                 # Load all Kali tools to ensure they're initialized
-                all_tools = get_all_kali_tools()
-                categories = get_tool_categories()
+                self.kali_tools = extensive_kali_tools.get_all_kali_tools()
+                self.kali_categories = extensive_kali_tools.get_tool_categories()
                 
                 if RICH_AVAILABLE:
-                    console.print(f"[bold green]Loaded {len(all_tools)} Kali Linux tools across {len(categories)} categories[/]")
+                    console.print(f"[green]Loaded {len(self.kali_tools)} Kali tools across {len(self.kali_categories)} categories[/green]")
                 else:
-                    print(f"\033[1;32m[+] Loaded {len(all_tools)} Kali Linux tools across {len(categories)} categories\033[0m")
+                    print(f"Loaded {len(self.kali_tools)} Kali tools across {len(self.kali_categories)} categories")
                 
-                # Log successful tool loading
-                logger.info(f"Loaded {len(all_tools)} Kali Linux tools across {len(categories)} categories")
                 return True
             except Exception as e:
-                logger.error(f"Error initializing Kali tools database: {e}")
                 if RICH_AVAILABLE:
-                    console.print(f"[bold red]Error loading Kali Linux tools database: {str(e)}[/]")
+                    console.print(f"[yellow]Warning: Could not initialize Kali tools: {e}[/yellow]")
                 else:
-                    print(f"\033[1;31m[!] Error loading Kali Linux tools database: {str(e)}\033[0m")
+                    print(f"Warning: Could not initialize Kali tools: {e}")
                 return False
         return False
+
+    def get_relevant_kali_tools(self, request: str) -> List[str]:
+        """Get relevant Kali tools based on the request."""
+        if not extensive_kali_tools or not self.kali_tools:
+            return []
+            
+        try:
+            # Extract keywords from request
+            keywords = request.lower().split()
+            
+            # Get relevant categories
+            relevant_categories = []
+            for category in self.kali_categories:
+                if any(keyword in category.lower() for keyword in keywords):
+                    relevant_categories.append(category)
+            
+            # Get tools from relevant categories
+            relevant_tools = []
+            for category in relevant_categories:
+                try:
+                    category_tools = extensive_kali_tools.get_tools_by_category(category)
+                    if category_tools:
+                        for tool in category_tools:
+                            if tool["name"] not in relevant_tools:
+                                relevant_tools.append(tool["name"])
+                except Exception as e:
+                    print(f"Warning: Error getting tools for category {category}: {e}")
+            
+            return relevant_tools
+        except Exception as e:
+            print(f"Warning: Error getting relevant Kali tools: {e}")
+            return []
+
+    def suggest_alternative_command(self, failed_cmd: str, stderr: str, variables: Dict[str, str]) -> List[str]:
+        """Suggest alternative commands based on the error and available tools."""
+        suggested_commands = []
+        
+        # First use extensive_kali_tools if available
+        relevant_tools = []
+        if extensive_kali_tools and self.kali_tools:
+            try:
+                # Extract keywords from error message
+                keywords = stderr.lower().split()
+                
+                # Get relevant categories
+                relevant_categories = []
+                for category in self.kali_categories:
+                    if any(keyword in category.lower() for keyword in keywords):
+                        relevant_categories.append(category)
+                
+                # Get tools from relevant categories
+                for category in relevant_categories:
+                    try:
+                        category_tools = extensive_kali_tools.get_tools_by_category(category)
+                        if category_tools:
+                            for tool in category_tools:
+                                if tool["name"] not in relevant_tools:
+                                    relevant_tools.append(tool["name"])
+                    except Exception as e:
+                        print(f"Warning: Error getting tools for category {category}: {e}")
+                
+                # Try to get example commands from Kali tools database
+                for tool_name in relevant_tools[:2]:  # Get examples from top 2 tools
+                    try:
+                        tool_info = extensive_kali_tools.get_tool_info(tool_name)
+                        if tool_info and "examples" in tool_info:
+                            examples = tool_info["examples"]
+                            for example in examples:
+                                if "command" in example:
+                                    suggested_commands.append(example["command"])
+                    except Exception as e:
+                        print(f"Warning: Error getting tool info for {tool_name}: {e}")
+            except Exception as e:
+                print(f"Warning: Error suggesting alternative commands: {e}")
+        
+        # If no suggestions from Kali tools, add some generic ones
+        if not suggested_commands:
+            if "nmap" in failed_cmd:
+                suggested_commands = [f"sudo nmap -sS -p- {variables.get('target', 'TARGET_IP')}"]
+            elif "hydra" in failed_cmd:
+                suggested_commands = [f"hydra -L users.txt -P passwords.txt {variables.get('target', 'TARGET_IP')} ssh"]
+            else:
+                suggested_commands = [f"sudo {failed_cmd}"]
+        
+        return suggested_commands
+
+    def generate_next_command(self, request: str, previous_command: str, previous_output: str, variables: Dict[str, str]) -> str:
+        """Generate the next command based on the request and previous output."""
+        # First use extensive_kali_tools if available
+        if extensive_kali_tools and self.kali_tools:
+            try:
+                # Get all available Kali tools
+                all_kali_tools = self.kali_tools
+                
+                # Extract keywords from request
+                keywords = request.lower().split()
+                
+                # Get relevant categories
+                relevant_categories = []
+                for category in self.kali_categories:
+                    if any(keyword in category.lower() for keyword in keywords):
+                        relevant_categories.append(category)
+                
+                # Get tools from relevant categories
+                relevant_tools = []
+                for category in relevant_categories:
+                    try:
+                        category_tools = extensive_kali_tools.get_tools_by_category(category)
+                        if category_tools and len(category_tools) > 0:
+                            # Get up to 3 tools from each category
+                            relevant_tools.extend([tool["name"] for tool in category_tools[:3]])
+                    except Exception as e:
+                        print(f"Warning: Error getting tools for category {category}: {e}")
+                
+                # If we found relevant tools, use them
+                if relevant_tools:
+                    # Get the first tool's example command
+                    tool_info = extensive_kali_tools.get_tool_info(relevant_tools[0])
+                    if tool_info and "examples" in tool_info and tool_info["examples"]:
+                        return tool_info["examples"][0]["command"]
+            except Exception as e:
+                print(f"Warning: Error generating command from Kali tools: {e}")
+        
+        # Fallback to default command generation if Kali tools failed
+        return f"sudo {request}"
     
     def get_network_interfaces(self):
         """Get a list of all available network interfaces on the system."""
@@ -287,17 +457,17 @@ class PAW:
             # Don't use fancy spinner for thinking animation to avoid display conflicts
             if RICH_AVAILABLE:
                 console.print("[bold cyan]Thinking...[/]", end="")
-                    
-                    response = httpx.post(
-                        f"{OLLAMA_HOST}/api/generate",
-                        json={
-                            "model": MODEL,
-                            "prompt": prompt,
-                            "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Your job is to help users perform cybersecurity tasks by translating natural language requests into a sequence of commands. For each request, output a JSON object with the following structure: {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. The 'plan' should outline the steps to achieve the user's goal, 'commands' should list the actual Linux commands to execute (one per line), and 'explanation' should provide context for what each command does.",
-                            "stream": False,
-                        },
-                        timeout=LLM_TIMEOUT
-                    )
+                
+                response = httpx.post(
+                    f"{OLLAMA_HOST}/api/generate",
+                    json={
+                        "model": MODEL,
+                        "prompt": prompt,
+                        "system": "You are PAW, a Prompt Assisted Workflow tool for Kali Linux. Your job is to help users perform cybersecurity tasks by translating natural language requests into a sequence of commands. For each request, output a JSON object with the following structure: {\"plan\": [string], \"commands\": [string], \"explanation\": [string]}. The 'plan' should outline the steps to achieve the user's goal, 'commands' should list the actual Linux commands to execute (one per line), and 'explanation' should provide context for what each command does.",
+                        "stream": False,
+                    },
+                    timeout=LLM_TIMEOUT
+                )
                 
                 # Clear the line
                 console.print("\r" + " " * 50 + "\r", end="")
@@ -353,7 +523,7 @@ class PAW:
             if json_start != -1 and json_end != -1 and json_end > json_start:
                 json_str = text[json_start:json_end]
                 try:
-                return json.loads(json_str)
+                    return json.loads(json_str)
                 except json.JSONDecodeError:
                     # If parsing fails, try to clean the JSON string
                     # Some models might add escape characters that break JSON
@@ -411,11 +581,11 @@ class PAW:
             # If still no commands found, use the original approach - whole text as command
             # But first check if it actually looks like a command rather than just text
             if any(text.strip().startswith(prefix) for prefix in command_prefixes):
-            return {
-                "plan": ["Process the request"],
-                "commands": [text.strip()],
-                "explanation": ["Generated command based on your request"]
-            }
+                return {
+                    "plan": ["Process the request"],
+                    "commands": [text.strip()],
+                    "explanation": ["Generated command based on your request"]
+                }
             else:
                 # If text doesn't look like a command, don't execute anything
                 return {
@@ -1251,26 +1421,26 @@ The command should directly use the values from the previous output when appropr
             # Use direct call to generate response without using Progress
             if RICH_AVAILABLE:
                 console.print("[bold cyan]Generating next command...[/]")
-        
-        response = self.generate_llm_response(context)
-        
-        if "error" in response:
-                logger.error(f"Error generating next command: {response['error']}")
-            return None, None
-        
-        # Extract the next command and explanation
-        next_command = response.get("command", "")
-        if isinstance(next_command, list) and next_command:
-            next_command = next_command[0]
-        
-        explanation = response.get("explanation", "")
-        if isinstance(explanation, list) and explanation:
-            explanation = explanation[0]
-
-        # Substitute any remaining placeholders
-        next_command = self.substitute_variables(next_command, variables)
             
-        return next_command, explanation
+            response = self.generate_llm_response(context)
+            
+            if "error" in response:
+                logger.error(f"Error generating next command: {response['error']}")
+                return None, None
+            
+            # Extract the next command and explanation
+            next_command = response.get("command", "")
+            if isinstance(next_command, list) and next_command:
+                next_command = next_command[0]
+            
+            explanation = response.get("explanation", "")
+            if isinstance(explanation, list) and explanation:
+                explanation = explanation[0]
+
+            # Substitute any remaining placeholders
+            next_command = self.substitute_variables(next_command, variables)
+                
+            return next_command, explanation
         except Exception as e:
             logger.error(f"Error generating next command: {e}")
             return None, None
@@ -1369,7 +1539,7 @@ The command should directly use the values from the previous output when appropr
         
         # First use extensive_kali_tools if available
         relevant_tools = []
-        if KALI_TOOLS_AVAILABLE:
+        if extensive_kali_tools and extensive_kali_tools.KALI_TOOLS_AVAILABLE:
             try:
                 # Extract keywords from request
                 keywords = [word.lower() for word in request.split() if len(word) > 3]
@@ -1393,7 +1563,7 @@ The command should directly use the values from the previous output when appropr
                 # Get recommended tools from these categories
                 for category in relevant_categories:
                     try:
-                        category_tools = get_tools_by_category(category)
+                        category_tools = tools_registry.get_tools_by_category(category)
                         if category_tools:
                             for tool in category_tools:
                                 if "name" in tool:
@@ -1460,11 +1630,11 @@ The command should directly use the values from the previous output when appropr
                         target = word
                         break
                 suggested_commands = [f"sudo nmap -sS -p- {target}"]
-            elif KALI_TOOLS_AVAILABLE:
+            elif extensive_kali_tools and extensive_kali_tools.KALI_TOOLS_AVAILABLE:
                 # Try to get example commands from Kali tools database
                 for tool_name in relevant_tools[:2]:  # Get examples from top 2 tools
                     try:
-                        tool_info = get_tool_info(tool_name)
+                        tool_info = tools_registry.get_tool_info(tool_name)
                         if tool_info and "examples" in tool_info:
                             examples = tool_info["examples"]
                             if examples:
@@ -1532,10 +1702,10 @@ The command should directly use the values from the previous output when appropr
             context.append("For GPG password cracking, use gpg2john to extract the hash, then john to crack it.")
         
         # Add Kali tools guidance from extensive_kali_tools if available
-        if KALI_TOOLS_AVAILABLE:
+        if extensive_kali_tools and extensive_kali_tools.KALI_TOOLS_AVAILABLE:
             try:
                 # Get all available Kali tools
-                all_kali_tools = get_all_kali_tools()
+                all_kali_tools = extensive_kali_tools.get_all_kali_tools()
                 
                 # Extract keywords from request
                 keywords = [word.lower() for word in request.split() if len(word) > 3]
@@ -1566,7 +1736,7 @@ The command should directly use the values from the previous output when appropr
                 # Add category-specific tool recommendations
                 for category in relevant_categories:
                     try:
-                        category_tools = get_tools_by_category(category)
+                        category_tools = tools_registry.get_tools_by_category(category)
                         if category_tools and len(category_tools) > 0:
                             # Get up to 3 tools from each category
                             sample_tools = category_tools[:3]
@@ -1591,7 +1761,7 @@ The command should directly use the values from the previous output when appropr
                                         # New format: list of dictionaries with description and command
                                         for i, example in enumerate(examples[:2]):
                                             tool_recommendations.append(f"  Example: {example.get('command')} - {example.get('description')}")
-                        else:
+                                    else:
                                         # Old format: list of example command strings
                                         for i, example in enumerate(examples[:2]):
                                             tool_recommendations.append(f"  Example: {example}")
@@ -1611,9 +1781,9 @@ The command should directly use the values from the previous output when appropr
         # Generate the response
         response = self.generate_llm_response("\n".join(context) + "\n\nRequest: " + request)
         if "error" in response:
-                    if RICH_AVAILABLE:
+            if RICH_AVAILABLE:
                 console.print(f"[bold red]{response['error']}[/]")
-                    else:
+            else:
                 print(f"\033[1;31m[!] {response['error']}\033[0m")
             return response
         
@@ -1660,7 +1830,7 @@ The command should directly use the values from the previous output when appropr
                         
                         # Update variables with any values extracted from the output
                         variables.update(result.get("variables", {}))
-                        else:
+                else:
                     # Execute all commands in sequence with y/n confirmation
                     variables = {"request": request}
                     for i, (cmd, explanation) in enumerate(zip(commands, explanations), 1):
@@ -1681,7 +1851,7 @@ The command should directly use the values from the previous output when appropr
                                 console.print(f"[yellow]Skipping command: {cmd}[/]")
                             else:
                                 print(f"\033[1;33m[*] Skipping command: {cmd}\033[0m")
-                    else:
+            else:
                 # No commands were generated
                 if RICH_AVAILABLE:
                     console.print("[bold yellow]No commands were generated for this request.[/]")
@@ -1691,9 +1861,9 @@ The command should directly use the values from the previous output when appropr
             return response
         except Exception as e:
             logger.error(f"Failed to process response: {e}")
-        if RICH_AVAILABLE:
+            if RICH_AVAILABLE:
                 console.print(f"[bold red]Error: {str(e)}[/]")
-        else:
+            else:
                 print(f"\033[1;31m[!] Error: {str(e)}\033[0m")
             return {"error": f"Failed to process response: {e}"}
 
@@ -1733,7 +1903,8 @@ def main():
         THEME = args.theme
     
     # Display ASCII art
-    display_ascii_art()
+    if ascii_art:
+        ascii_art.display_ascii_art()
     
     # Show fancy header if rich is available
     if RICH_AVAILABLE:
