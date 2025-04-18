@@ -1665,252 +1665,307 @@ The command should directly use the values from the previous output when appropr
             "suggested_commands": suggested_commands
         }
 
-    def build_context_library(self):
-        """Build an extensive library of context templates for different types of security tasks."""
-        # Determine if sudo should be used
-        sudo_prefix = "sudo " if self.use_sudo else ""
-        sudo_instruction = "ALWAYS prefix ALL commands with sudo to ensure sufficient permissions." if self.use_sudo else "AVOID using sudo in commands to prevent password prompts. Only use sudo when absolutely necessary for non-interactive commands."
+    def build_context(self, request, placeholders, session_context=None):
+        """Build context for command generation based on user request.
         
-        context_library = {
-            # Core context that's always included
-            "core": [
-                "You are a helpful Kali Linux command assistant. Generate commands based on the user's request.",
-                "You must return a JSON object with the following structure: {\"plan\": [steps], \"commands\": [commands], \"explanation\": [explanations]}",
-                "IMPORTANT: Your commands MUST directly address the user's request and be appropriate for their system, the user is always right, and you are not to question the user's request.",
-                sudo_instruction
-            ],
+        Args:
+            request (str): The user's request
+            placeholders (dict): Dictionary of placeholders extracted from request
+            session_context (dict): Dictionary of session context variables
             
-            # Network scanning and reconnaissance
-            "scan": [
-                "Use nmap for port scanning with appropriate flags: -sS (SYN scan), -sV (version detection), -p- (all ports), -A (aggressive scan).",
-                "For web server scanning, use nikto for vulnerabilities and dirb/gobuster for directory discovery.",
-                "For DNS enumeration, use dnsrecon or dnsenum."
-            ],
-            
-            "recon": [
-                "Start with passive reconnaissance using tools like whois, host, and dig.",
-                "For host discovery, use nmap with ping scan (-sn) or netdiscover.",
-                "For comprehensive service enumeration, combine nmap with other specialized tools."
-            ],
-            
-            # Web application
-            "web": [
-                "For web application scanning, use tools like dirb, gobuster, nikto, wpscan, or sqlmap.",
-                "For directory discovery, use gobuster dir -u [URL] -w /usr/share/wordlists/dirb/common.txt.",
-                "For WordPress sites, use wpscan --url [URL] to identify vulnerabilities.",
-                "For SQL injection testing, use sqlmap -u [URL] --forms --batch --dbs."
-            ],
-            
-            # Password attacks
-            "password": [
-                "For password cracking, use John the Ripper or hashcat with appropriate wordlists.",
-                "For common hash formats, use john --format=[format] [hashfile] or hashcat -m [mode] [hashfile] [wordlist].",
-                "The main wordlist is typically located at /usr/share/wordlists/rockyou.txt.",
-                "For online password attacks, use hydra or medusa with proper rate limiting."
-            ],
-            
-            "crack": [
-                "For password cracking, first identify the hash type, then use appropriate tools.",
-                "With John the Ripper: sudo john --wordlist=/usr/share/wordlists/rockyou.txt [hashfile].",
-                "With hashcat: sudo hashcat -m [hash_type] -a 0 [hashfile] [wordlist].",
-                "For GPU acceleration with hashcat, use --force or -O flags."
-            ],
-            
-            "hash": [
-                "Use hash-identifier or hashid to identify unknown hash types.",
-                "Common hash modes for hashcat: MD5 (0), SHA1 (100), SHA256 (1400), SHA512 (1700), NTLM (1000).",
-                "Extract hashes from files using tools like pdf2john, zip2john, office2john before cracking."
-            ],
-            
-            # Wireless attacks
-            "wifi": [
-                "For WiFi scanning, use airmon-ng to put interface in monitor mode, then airodump-ng to capture traffic.",
-                "For WPA handshake capturing: sudo airmon-ng start [interface]; sudo airodump-ng [monitor-interface] --bssid [target_MAC] -c [channel] -w [output_file].",
-                "Crack captured handshakes with: sudo aircrack-ng [capture_file] -w [wordlist]."
-            ],
-            
-            "wireless": [
-                "Start with sudo airmon-ng check kill to stop processes that could interfere.",
-                "Put interface in monitor mode: sudo airmon-ng start [interface].",
-                "Capture traffic: sudo airodump-ng [monitor-interface].",
-                "For WPS attacks, consider using reaver or bully."
-            ],
-            
-            # Exploitation
-            "exploit": [
-                "Use Metasploit Framework for exploitation: sudo msfconsole.",
-                "Search for exploits with: search [vulnerability/CVE].",
-                "Set up with: use [exploit_path]; set RHOSTS [target]; set payload [payload]; run.",
-                "For manual exploitation, research the specific CVE and use appropriate tools."
-            ],
-            
-            "metasploit": [
-                "Start Metasploit with: sudo msfconsole.",
-                "Find exploits: search type:exploit platform:[platform] cve:[year].",
-                "Multi-handler for payloads: use multi/handler; set payload [payload]; set LHOST [your_IP]; run.",
-                "Database operations: db_nmap, hosts, services commands for tracking."
-            ],
-            
-            # Privilege escalation
-            "privilege": [
-                "For Linux privilege escalation enumeration, use LinPEAS or LinEnum scripts.",
-                "For Windows, use WinPEAS or PowerUp.",
-                "Check for SUID binaries: sudo find / -perm -u=s -type f 2>/dev/null.",
-                "Investigate cron jobs, sudo rights, kernel exploits, and writable service files."
-            ],
-            
-            "escalation": [
-                "Check for sudo misconfiguration: sudo -l.",
-                "Look for exploitable services: ps aux | grep root.",
-                "Search for kernel exploits based on kernel version: uname -a.",
-                "Monitor running processes with pspy."
-            ],
-            
-            # Forensics and analysis
-            "forensics": [
-                "Use tools like autopsy, foremost, or photorec for file recovery.",
-                "For memory analysis, use volatility framework.",
-                "For disk imaging, use dd or dcfldd.",
-                "For log analysis, use tools like grep, awk, and ELK stack."
-            ],
-            
-            "analysis": [
-                "For network traffic analysis, use wireshark or tshark.",
-                "For static file analysis, use tools like binwalk, strings, exiftool.",
-                "For malware analysis, consider REMnux distribution and tools like radare2.",
-                "For pcap analysis: tshark -r [capture_file] -Y [display_filter]."
-            ],
-            
-            # Steganography
-            "stego": [
-                "For steganography detection, use stegdetect or stegspy.",
-                "For extraction, use steghide: steghide extract -sf [file].",
-                "For analysis, use binwalk or foremost to extract hidden data.",
-                "For LSB steganography, consider tools like zsteg or LSBSteg."
-            ],
-            
-            # Social engineering
-            "social": [
-                "For phishing attacks, use tools like Social-Engineer Toolkit (setoolkit).",
-                "For creating malicious documents, use tools like msfvenom.",
-                "For website cloning: setoolkit -> Social-Engineering Attacks -> Website Attack Vectors -> Credential Harvester.",
-                "Always set up proper logging and notification for collected credentials."
-            ],
-            
-            # Post-exploitation
-            "post": [
-                "For data exfiltration, consider encryption and compression.",
-                "For persistence, analyze cron jobs, startup services, or scheduled tasks.",
-                "For lateral movement, use tools like proxychains, port forwarding, or SSH tunneling.",
-                "For covering tracks, clear logs with: sudo rm -rf /var/log/*."
-            ],
-            
-            # MAC address operations
-            "mac": [
-                "For MAC address changes, first check the current MAC address with ifconfig or ip link.",
-                "Bring interface down: sudo ip link set dev [interface] down.",
-                "Change MAC: sudo macchanger -r [interface] or sudo ip link set dev [interface] address XX:XX:XX:XX:XX:XX.",
-                "Bring interface back up: sudo ip link set dev [interface] up."
-            ],
-            
-            # Cryptography 
-            "decrypt": [
-                "For encrypted files, first identify the encryption type.",
-                "For GPG files, use gpg2john to extract the hash, then crack with John the Ripper.",
-                "For encrypted disks, use cryptsetup for LUKS containers.",
-                "For encrypted archives, use fcrackzip for ZIP or john for other formats."
-            ],
-            
-            "gpg": [
-                "For GPG password cracking, use this workflow with John the Ripper:",
-                f"1. Extract the hash: {sudo_prefix}gpg2john [gpg_file] > hash.txt",
-                f"2. Crack the password: {sudo_prefix}john hash.txt",
-                f"3. Display results: {sudo_prefix}john --show hash.txt",
-                "DO NOT attempt to use gpg --decrypt as the primary approach for password recovery."
-            ],
-            
-            # Network manipulation
-            "proxy": [
-                "For proxy chains, use: proxychains [command].",
-                "Configure proxychains in /etc/proxychains.conf.",
-                "For SOCKS proxy with SSH: ssh -D 1080 user@host.",
-                "For HTTP proxy with Burp Suite, set up proxy on 127.0.0.1:8080."
-            ],
-            
-            "vpn": [
-                "For OpenVPN connections: sudo openvpn --config [config_file].",
-                "For WireGuard: sudo wg-quick up [interface].",
-                "Check connection status with: ip addr show."
-            ],
-            
-            # System and file operations
-            "file": [
-                "For file operations, use standard Linux commands: ls, cat, grep, find.",
-                "For file recovery: sudo foremost -i [device] -o [output_dir].",
-                "For secure deletion: sudo shred -zvu -n 10 [file].",
-                "For disk usage analysis: sudo du -sh /* | sort -hr."
-            ],
-            
-            # Vulnerability assessment
-            "vulnerability": [
-                "For vulnerability scanning, use OpenVAS or Nessus.",
-                "For web vulnerabilities, use OWASP ZAP or Burp Suite.",
-                "For system auditing, use Lynis: sudo lynis audit system.",
-                "For network-wide scanning: sudo nmap --script vuln [target]."
-            ],
-            
-            "cve": [
-                "Search for CVEs with searchsploit or from the Exploit-DB website.",
-                "Use searchsploit [keywords] to find exploits locally.",
-                "Update the database with: sudo searchsploit -u.",
-                "Use --examine option to examine exploit code before using it."
-            ],
-            
-            # Network services
-            "ftp": [
-                "For FTP enumeration: nmap -p 21 --script ftp-* [target].",
-                "For anonymous access: ftp [target] (username: anonymous).",
-                "For brute forcing: hydra -l [user] -P [wordlist] [target] ftp."
-            ],
-            
-            "ssh": [
-                "For SSH enumeration: nmap -p 22 --script ssh-* [target].",
-                "For key-based auth: ssh -i [key_file] [user]@[target].",
-                "For brute forcing: hydra -l [user] -P [wordlist] [target] ssh."
-            ],
-            
-            "smb": [
-                "For SMB enumeration: nmap -p 445 --script smb-* [target].",
-                "List shares: smbclient -L [target].",
-                "Connect to share: smbclient //[target]/[share].",
-                "For null sessions: smbclient -N //[target]/[share]."
-            ],
-            
-            # OSINT
-            "osint": [
-                "For OSINT gathering, use tools like theHarvester, Maltego, or Shodan.",
-                "For email harvesting: theHarvester -d [domain] -b all.",
-                "For social media reconnaissance, use tools like sherlock.",
-                "For subdomain enumeration: sublist3r -d [domain]."
-            ],
-            
-            # Reverse engineering
-            "reverse": [
-                "For reverse engineering, use tools like Ghidra, radare2, or GDB.",
-                "For binary analysis: r2 -A [binary].",
-                "For debugging: gdb -q [binary].",
-                "For assembling/disassembling: nasm or objdump."
-            ],
-            
-            # Custom tools and workflows
-            "custom": [
-                "For adding custom tools to your workflow, consider creating aliases or scripts.",
-                "Document your custom tools and workflows for future reference.",
-                "Consider creating Docker containers for specific tool environments."
-            ]
+        Returns:
+            dict: Context for command generation
+        """
+        # Initialize context with core information
+        context = {
+            "request": request,
+            "placeholders": placeholders,
+            "command_type": "shell",
+            "os": "kali",
+            "use_sudo": self.use_sudo
         }
         
-        return context_library
+        # Add session context if available
+        if session_context:
+            context.update(session_context)
+        
+        # Get relevant Kali tools directly from extensive_kali_tools module
+        # instead of using the context library
+        kali_tools = []
+        if extensive_kali_tools:
+            # Get all tools that might be relevant to the request
+            kali_tools = self.get_relevant_kali_tools(request)
+            
+            if kali_tools:
+                # Enhanced tool information with examples from extensive_kali_tools
+                enhanced_tools = []
+                for tool in kali_tools:
+                    # Get detailed tool info including examples and common usage
+                    tool_info = extensive_kali_tools.get_tool_info(tool['name'])
+                    if tool_info:
+                        # Add examples from the tools to make commands more accurate
+                        examples = []
+                        if 'examples' in tool_info:
+                            for example in tool_info['examples'][:3]:  # Limit to 3 examples
+                                examples.append({
+                                    'description': example['description'],
+                                    'command': example['command']
+                                })
+                        
+                        enhanced_tool = {
+                            'name': tool_info['name'],
+                            'description': tool_info['description'],
+                            'common_usage': tool_info.get('common_usage', ''),
+                            'examples': examples
+                        }
+                        enhanced_tools.append(enhanced_tool)
+                
+                context["kali_tools"] = enhanced_tools
+        
+        # Instead of using the context library, gather relevant command examples 
+        # directly from the Kali tools based on request type
+        examples = []
+        
+        # Detect specific security tasks from the request
+        request_lower = request.lower()
+        
+        # Match request to categories of tools in extensive_kali_tools
+        categories_to_check = []
+        
+        # Map common request keywords to Kali tool categories
+        keyword_category_map = {
+            "scan": "Information Gathering",
+            "enumerate": "Information Gathering",
+            "recon": "Information Gathering",
+            "information": "Information Gathering",
+            "gather": "Information Gathering",
+            "vulnerability": "Vulnerability Analysis",
+            "vuln": "Vulnerability Analysis",
+            "web": "Web Application Analysis",
+            "sql": "Web Application Analysis",
+            "injection": "Web Application Analysis",
+            "password": "Password Attacks", 
+            "crack": "Password Attacks",
+            "brute": "Password Attacks",
+            "wireless": "Wireless Attacks",
+            "wifi": "Wireless Attacks",
+            "exploit": "Exploitation Tools",
+            "reverse": "Reverse Engineering",
+            "forensic": "Forensics",
+            "sniff": "Sniffing & Spoofing",
+            "spoof": "Sniffing & Spoofing",
+            "post": "Post Exploitation",
+            "social": "Social Engineering Tools",
+            "crypto": "Cryptography",
+            "database": "Database Assessment",
+            "bluetooth": "Bluetooth Attacks"
+        }
+        
+        # Check for matches in the request
+        for keyword, category in keyword_category_map.items():
+            if keyword in request_lower and category not in categories_to_check:
+                categories_to_check.append(category)
+        
+        # If no specific categories matched, use these default categories
+        if not categories_to_check:
+            categories_to_check = ["Information Gathering", "Vulnerability Analysis", "Password Attacks"]
+        
+        # Get tool examples from each relevant category
+        if extensive_kali_tools:
+            for category in categories_to_check:
+                category_tools = extensive_kali_tools.get_tools_by_category(category)
+                for tool in category_tools[:2]:  # Limit to 2 tools per category
+                    tool_info = extensive_kali_tools.get_tool_info(tool['name'])
+                    if tool_info and 'examples' in tool_info:
+                        for example in tool_info['examples'][:2]:  # Limit to 2 examples per tool
+                            examples.append(f"{tool_info['name']}: {example['command']} - {example['description']}")
+        
+        # Add examples to context
+        context["examples"] = examples
+        
+        # Handle special case for GPG password cracking
+        if "crack" in request_lower and ("gpg" in request_lower or ".gpg" in request_lower):
+            gpg_examples = [
+                "gpg2john file.gpg > hash.txt - Extract hash from GPG file",
+                "john hash.txt - Attempt to crack with John the Ripper",
+                "john --wordlist=/usr/share/wordlists/rockyou.txt hash.txt - Use rockyou wordlist",
+                "john --show hash.txt - Show cracked passwords"
+            ]
+            context["examples"] = gpg_examples + context["examples"]
+        
+        return context
+
+    def extract_placeholders(self, text):
+        """Extract command placeholders from text using regex.
+        
+        Args:
+            text (str): The text to extract placeholders from
+            
+        Returns:
+            dict: Dictionary of placeholders and their default values
+        """
+        placeholders = {}
+        
+        # Match patterns like [target], [ip], [port], etc.
+        pattern = r'\[([a-zA-Z0-9_]+)(?::([^]]*))?\]'
+        matches = re.findall(pattern, text)
+        
+        for match in matches:
+            placeholder = match[0]
+            default_value = match[1] if len(match) > 1 and match[1] else ""
+            placeholders[placeholder] = default_value
+            
+        return placeholders
+
+    def get_response(self, context):
+        """Generate a response based on context using the LLM.
+        
+        Args:
+            context (dict): Context for generating the response
+            
+        Returns:
+            str: The generated response
+        """
+        # Build prompt from context
+        prompt = self.build_prompt(context)
+        
+        # Use LLM to generate response
+        response = self.generate_llm_response(prompt)
+        
+        return response
+    
+    def build_prompt(self, context):
+        """Build a prompt for the LLM based on context.
+        
+        Args:
+            context (dict): Context for building the prompt
+            
+        Returns:
+            str: The prompt for the LLM
+        """
+        # Extract information from context
+        request = context["request"]
+        examples = context.get("examples", [])
+        
+        # Build prompt with clear instructions
+        prompt = f"""Generate precise Kali Linux commands to: {request}
+
+I need specific command-line instructions that will work on Kali Linux. 
+Include exact syntax and all necessary parameters.
+Return the commands that will help me accomplish this task effectively.
+
+"""
+        
+        # Add examples if available
+        if examples:
+            prompt += "Related command examples:\n"
+            for example in examples[:5]:  # Limit to 5 examples to keep prompt size reasonable
+                prompt += f"- {example}\n"
+        
+        # Add detailed tool guidance if available
+        if "kali_tools" in context:
+            tools = context["kali_tools"]
+            prompt += "\nRelevant Kali tools with usage examples:\n"
+            
+            for tool in tools:
+                prompt += f"\n{tool['name']}: {tool['description']}\n"
+                prompt += f"Common usage: {tool.get('common_usage', '')}\n"
+                
+                if 'examples' in tool and tool['examples']:
+                    prompt += "Examples:\n"
+                    for example in tool['examples']:
+                        prompt += f"  - {example['command']} ({example['description']})\n"
+        
+        # Add specific instructions for handling file paths and complex commands
+        prompt += """
+Important notes:
+1. Use absolute paths for files and directories
+2. Include all necessary flags and parameters
+3. Provide commands that can be run directly in the terminal
+4. For commands requiring sudo, include the sudo prefix
+5. For multi-step processes, provide each command separately
+
+Please ensure the commands are accurate and follow Kali Linux best practices.
+"""
+        
+        return prompt
+    
+    def extract_commands(self, response):
+        """Extract commands and explanations from a response.
+        
+        Args:
+            response (str): The response from the LLM
+            
+        Returns:
+            tuple: (commands, explanations)
+        """
+        commands = []
+        explanations = []
+        
+        try:
+            # Try to extract JSON
+            data = self.extract_json_from_response(response)
+            
+            if data and "commands" in data:
+                commands = data["commands"]
+                explanations = data.get("explanation", [""] * len(commands))
+                
+                # Ensure explanations has the same length as commands
+                if len(explanations) < len(commands):
+                    explanations.extend([""] * (len(commands) - len(explanations)))
+                
+                return commands, explanations
+            
+            # If JSON extraction fails, try to extract commands directly
+            lines = response.split("\n")
+            current_command = ""
+            current_explanation = ""
+            
+            for line in lines:
+                line = line.strip()
+                
+                if line.startswith("$") or line.startswith("#"):
+                    # If we have an existing command, add it to the list
+                    if current_command:
+                        commands.append(current_command)
+                        explanations.append(current_explanation)
+                        current_explanation = ""
+                    
+                    # Start a new command
+                    current_command = line[1:].strip() if line.startswith("$") else line[1:].strip()
+                elif line.startswith("-") or line.startswith("*"):
+                    # This is likely an explanation
+                    current_explanation += line[1:].strip() + " "
+                elif current_command and not line.startswith(("```", "###")):
+                    # Continuation of command or explanation
+                    if line:
+                        current_explanation += line + " "
+            
+            # Add the last command if it exists
+            if current_command:
+                commands.append(current_command)
+                explanations.append(current_explanation)
+            
+            # If we still don't have commands, try a simpler approach
+            if not commands:
+                for line in lines:
+                    line = line.strip()
+                    if line and not line.startswith(("```", "#", "-", "*", ">")):
+                        if ":" in line:
+                            parts = line.split(":", 1)
+                            command = parts[1].strip()
+                            explanation = parts[0].strip()
+                            commands.append(command)
+                            explanations.append(explanation)
+                        else:
+                            commands.append(line)
+                            explanations.append("")
+        except Exception as e:
+            # If all extraction methods fail, return the response as a single command
+            commands = [response.split('\n')[0]]
+            explanations = ["Extracted command"]
+        
+        return commands, explanations
     
     def process_request(self, request, session_context=None):
         """Process a user request and generate a response."""
@@ -1927,6 +1982,10 @@ The command should directly use the values from the previous output when appropr
             
         if "PASSWORD" in request.upper() and any(word in request.upper() for word in ["GENERATE", "CREATE", "MAKE"]):
             return self.handle_password_request(request)
+            
+        # Handle GPG password cracking requests specifically
+        if "CRACK" in request.upper() and any(word in request.upper() for word in ["GPG", ".GPG"]):
+            return self.handle_gpg_crack_request(request)
         
         # Build context for command generation
         context = self.build_context(request, placeholders, session_context)
@@ -1958,6 +2017,82 @@ The command should directly use the values from the previous output when appropr
             
             if kali_recs:
                 response += "\n\nRecommended Kali Tools:\n" + "\n".join(kali_recs)
+        
+        return response
+        
+    def handle_gpg_crack_request(self, request):
+        """Handle requests to crack GPG file passwords.
+        
+        Args:
+            request (str): The user's request
+            
+        Returns:
+            str: The response with GPG password cracking instructions
+        """
+        # Extract file path from request
+        file_paths = self.extract_file_paths(request)
+        gpg_file = file_paths[0] if file_paths else "/home/kali/Downloads/wa.gpg"
+        
+        # Ensure the path is properly quoted to handle spaces in filenames
+        gpg_file_quoted = f'"{gpg_file}"'
+        
+        # Generate an output file path for the hash
+        hash_file = "/tmp/gpg_hash.txt"
+        
+        # Generate commands for GPG password cracking
+        commands = [
+            f"gpg2john {gpg_file_quoted} > {hash_file}",
+            f"john {hash_file}",
+            f"john --show {hash_file}",
+            "# If the above doesn't work, try with the standard wordlist",
+            f"john --wordlist=/usr/share/wordlists/rockyou.txt {hash_file}",
+            "# For more advanced cracking, try with rules",
+            f"john --rules --wordlist=/usr/share/wordlists/rockyou.txt {hash_file}",
+            "# After cracking the password, you can decrypt the file",
+            f"gpg --decrypt {gpg_file_quoted}"
+        ]
+        
+        explanations = [
+            "Extract hash from GPG file",
+            "Attempt to crack the password with default settings",
+            "Show any cracked passwords",
+            "Alternative approach comment",
+            "Try cracking with the rockyou wordlist",
+            "Advanced option comment",
+            "Use word mangling rules with the wordlist for more complex passwords",
+            "Decryption comment",
+            "Decrypt the file using the cracked password"
+        ]
+        
+        # Format response
+        response = f"""## GPG Password Cracking Process
+
+To crack the password for the GPG file **{gpg_file}**, follow these steps:
+
+"""
+        # Add the commands with explanations
+        current_step = 1
+        for i, (cmd, exp) in enumerate(zip(commands, explanations)):
+            # Skip comments in the command list
+            if cmd.startswith("#"):
+                response += f"\n**{exp}**\n"
+                continue
+            response += f"{current_step}. {exp}:\n   ```\n   {cmd}\n   ```\n\n"
+            current_step += 1
+        
+        # Add additional information about the tools
+        response += """
+### Notes:
+- GPG password cracking can be time-consuming depending on password complexity
+- John the Ripper will automatically select optimal settings based on your CPU
+- For stronger passwords, consider creating a custom wordlist based on target information
+- If the standard methods fail, try hashcat with GPU acceleration:
+  ```
+  hashcat -m 16700 -a 0 hash.txt /usr/share/wordlists/rockyou.txt
+  ```
+
+John the Ripper is automatically installed on Kali Linux. These commands will work directly without additional setup.
+"""
         
         return response
 

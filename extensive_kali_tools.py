@@ -50,17 +50,15 @@ CATEGORIES = [
     "Database Assessment",
     "Password Attacks",
     "Wireless Attacks",
-    "Bluetooth Attacks",
     "Reverse Engineering",
     "Exploitation Tools",
     "Sniffing & Spoofing",
     "Post Exploitation",
     "Forensics",
     "Reporting Tools",
-    "Social Engineering Tools",
+    "Social Engineering",
     "System Services",
-    "Cryptography",
-    "Hardware Hacking"
+    "Command & Control"
 ]
 
 # Set availability flag
@@ -217,38 +215,46 @@ KALI_TOOLS = [
         ]
     },
     {
+        "name": "gpg2john",
+        "category": "Password Attacks",
+        "description": "Extract hashes from GPG private key files for cracking with John the Ripper",
+        "common_usage": "gpg2john {gpg_file} > {hash_file}",
+        "examples": [
+            {"description": "Extract hash from GPG file", "command": "gpg2john encrypted.gpg > hash.txt"},
+            {"description": "Extract hash from multiple GPG files", "command": "gpg2john *.gpg > hashes.txt"},
+            {"description": "Process a GPG file with spaces in name", "command": "gpg2john \"My Secret File.gpg\" > hash.txt"}
+        ]
+    },
+    {
         "name": "john",
         "category": "Password Attacks",
-        "description": "John the Ripper password cracker with enhanced capabilities",
-        "common_usage": "john [options] {password-file}",
+        "description": "John the Ripper password cracker for various hash types including GPG",
+        "common_usage": "john [options] {hash_file}",
         "examples": [
-            {"description": "Basic crack", "command": "john hashes.txt"},
-            {"description": "Using wordlist", "command": "john --wordlist=/path/to/wordlist.txt hashes.txt"},
-            {"description": "Incremental mode", "command": "john --incremental hashes.txt"},
-            {"description": "Rule-based attack", "command": "john --rules --wordlist=/path/to/wordlist.txt hashes.txt"},
-            {"description": "Show cracked passwords", "command": "john --show hashes.txt"},
-            {"description": "Format-specific attack", "command": "john --format=nt hashes.txt"},
-            {"description": "Parallel processing", "command": "john --fork=4 hashes.txt"},
-            {"description": "Restore session", "command": "john --restore=session_name"},
-            {"description": "Custom rules", "command": "john --rules=custom --wordlist=/path/to/wordlist.txt hashes.txt"}
+            {"description": "Basic password cracking", "command": "john hash.txt"},
+            {"description": "Use specific wordlist", "command": "john --wordlist=/usr/share/wordlists/rockyou.txt hash.txt"},
+            {"description": "Show cracked passwords", "command": "john --show hash.txt"},
+            {"description": "Use rules for wordlist mangling", "command": "john --rules --wordlist=/usr/share/wordlists/rockyou.txt hash.txt"},
+            {"description": "Specify hash format", "command": "john --format=gpg hash.txt"},
+            {"description": "Increment mode (try different password lengths)", "command": "john --incremental hash.txt"},
+            {"description": "Session handling (resume later)", "command": "john --session=mysession hash.txt"},
+            {"description": "Restore previous session", "command": "john --restore=mysession"},
+            {"description": "GPG specific cracking", "command": "john --format=gpg --wordlist=/usr/share/wordlists/rockyou.txt hash.txt"}
         ]
     },
     {
         "name": "hashcat",
         "category": "Password Attacks",
-        "description": "Advanced password recovery tool with GPU acceleration",
-        "common_usage": "hashcat [options] {hash-file} [dictionary,mask,directory]",
+        "description": "Advanced password recovery utility with GPU acceleration",
+        "common_usage": "hashcat [options] {hash_file} [dictionary|mask]",
         "examples": [
-            {"description": "Dictionary attack", "command": "hashcat -m 0 -a 0 hashes.txt /path/to/wordlist.txt"},
-            {"description": "Brute force attack", "command": "hashcat -m 0 -a 3 hashes.txt ?a?a?a?a?a?a"},
-            {"description": "Hybrid attack", "command": "hashcat -m 0 -a 6 hashes.txt /path/to/wordlist.txt ?d?d?d"},
-            {"description": "Rule-based attack", "command": "hashcat -m 0 -a 0 hashes.txt /path/to/wordlist.txt -r /path/to/rules.txt"},
-            {"description": "Mask attack with custom charset", "command": "hashcat -m 0 -a 3 hashes.txt -1 ?l?u?d?s ?1?1?1?1?1?1"},
-            {"description": "WPA/WPA2 attack", "command": "hashcat -m 2500 -a 0 capture.hccapx /path/to/wordlist.txt"},
-            {"description": "NTLM attack", "command": "hashcat -m 1000 -a 0 hashes.txt /path/to/wordlist.txt"},
-            {"description": "MD5 attack with GPU", "command": "hashcat -m 0 -a 0 -D 2 hashes.txt /path/to/wordlist.txt"},
-            {"description": "Show cracked passwords", "command": "hashcat -m 0 --show hashes.txt"},
-            {"description": "Resume interrupted session", "command": "hashcat --restore"}
+            {"description": "Basic wordlist attack", "command": "hashcat -m 0 -a 0 hash.txt /usr/share/wordlists/rockyou.txt"},
+            {"description": "GPG hash cracking (if supported)", "command": "hashcat -m 16700 -a 0 hash.txt /usr/share/wordlists/rockyou.txt"},
+            {"description": "Use rules for wordlist mangling", "command": "hashcat -m 0 -a 0 -r /usr/share/hashcat/rules/best64.rule hash.txt /usr/share/wordlists/rockyou.txt"},
+            {"description": "Brute force attack with mask", "command": "hashcat -m 0 -a 3 hash.txt ?a?a?a?a?a?a"},
+            {"description": "Show cracked passwords", "command": "hashcat --show hash.txt"},
+            {"description": "Benchmark hash types", "command": "hashcat -b -m 0"},
+            {"description": "Use GPU acceleration", "command": "hashcat -m 0 -a 0 -d 1 hash.txt /usr/share/wordlists/rockyou.txt"}
         ]
     },
     
@@ -1574,6 +1580,49 @@ KALI_TOOLS.extend([
          ]
      }
 ])
+
+# Function to scrape and update the tools list from the Kali website (for reference)
+def update_tools_from_kali_website():
+    """
+    Reference function for updating tools from the Kali website.
+    This is not called automatically but can be used to refresh the tool list.
+    Requires internet connection and BeautifulSoup4.
+    """
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        
+        response = requests.get("https://www.kali.org/tools/all-tools/")
+        if response.status_code != 200:
+            print("Failed to fetch tools list from Kali website")
+            return
+            
+        soup = BeautifulSoup(response.text, 'html.parser')
+        tools = []
+        
+        # This is a simplified parser - actual implementation would need to adapt to the website structure
+        for section in soup.find_all('h3'):
+            category = section.get_text()
+            tool_list = section.find_next('ul')
+            if tool_list:
+                for tool in tool_list.find_all('li'):
+                    tool_name = tool.get_text().strip()
+                    if tool_name:
+                        tools.append({
+                            "name": tool_name,
+                            "category": "Information Gathering",  # Default category, would need proper mapping
+                            "description": "Tool from official Kali Linux repository"
+                        })
+        
+        print(f"Found {len(tools)} tools on the Kali website")
+        return tools
+        
+    except ImportError:
+        print("BeautifulSoup4 and requests are required for web scraping")
+        return []
+    except Exception as e:
+        print(f"Error updating tools from Kali website: {e}")
+        return []
 
 if __name__ == "__main__":
     main() 
