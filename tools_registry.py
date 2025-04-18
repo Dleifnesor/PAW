@@ -250,160 +250,71 @@ def get_tools_registry():
         try:
             with open(custom_registry_path, 'r') as f:
                 custom_registry = json.load(f)
-                # Ensure we have a list of tools
-                if isinstance(custom_registry, dict):
-                    # Convert dictionary to list of tools
-                    tools_list = []
-                    for name, tool_info in custom_registry.items():
-                        tool = tool_info.copy()
-                        tool['name'] = name
-                        tools_list.append(tool)
-                    return tools_list
-                elif isinstance(custom_registry, list):
-                    return custom_registry
-                else:
-                    print("Warning: Invalid registry format. Using default tools.")
+                # Merge with default registry
+                merged_registry = DEFAULT_TOOLS.copy()
+                merged_registry.update(custom_registry)
+                return merged_registry
         except Exception as e:
-            print(f"Warning: Could not load custom registry: {e}")
+            print(f"Error loading custom registry: {e}")
+            return DEFAULT_TOOLS
     
-    # Convert default tools dictionary to list
-    tools_list = []
-    for name, tool_info in DEFAULT_TOOLS.items():
-        tool = tool_info.copy()
-        tool['name'] = name
-        tools_list.append(tool)
-    
-    return tools_list
-
-def register_tool(tool):
-    """
-    Register a new tool in the registry.
-    
-    Args:
-        tool: Dictionary containing tool information
-        
-    Returns:
-        Boolean indicating success
-    """
-    # Ensure the tool has a name
-    if not isinstance(tool, dict) or "name" not in tool:
-        print("Error: Tool must be a dictionary with a 'name' key")
-        return False
-    
-    try:
-        # Create directory if it doesn't exist
-        custom_registry_dir = "/usr/local/share/paw/tools"
-        custom_registry_path = os.path.join(custom_registry_dir, "custom_registry.json")
-        
-        os.makedirs(custom_registry_dir, exist_ok=True)
-        
-        # Load existing registry or create a new one
-        if os.path.exists(custom_registry_path):
-            try:
-                with open(custom_registry_path, 'r') as f:
-                    custom_registry = json.load(f)
-                    
-                    # Convert to list if it's a dictionary
-                    if isinstance(custom_registry, dict):
-                        registry_list = []
-                        for name, info in custom_registry.items():
-                            tool_entry = info.copy()
-                            tool_entry['name'] = name
-                            registry_list.append(tool_entry)
-                    elif isinstance(custom_registry, list):
-                        registry_list = custom_registry
-                    else:
-                        registry_list = []
-            except Exception as e:
-                print(f"Warning: Could not load custom registry: {e}")
-                registry_list = []
-        else:
-            registry_list = []
-        
-        # Check if tool already exists
-        tool_exists = False
-        for i, existing_tool in enumerate(registry_list):
-            if existing_tool.get('name') == tool['name']:
-                # Update existing tool
-                registry_list[i] = tool
-                tool_exists = True
-                break
-        
-        # Add new tool if it doesn't exist
-        if not tool_exists:
-            registry_list.append(tool)
-        
-        # Save the updated registry
-        with open(custom_registry_path, 'w') as f:
-            json.dump(registry_list, f, indent=4)
-        
-        return True
-    except Exception as e:
-        print(f"Error registering tool: {e}")
-        return False
-
-def get_tools_by_category(category=None):
-    """
-    Get all tools or filter by category.
-    
-    Args:
-        category: Optional category to filter by
-        
-    Returns:
-        List of tools or filtered list by category
-    """
-    tools = get_tools_registry()
-    
-    if category:
-        return [tool for tool in tools if tool.get("category") == category]
-    
-    return tools
-
-def check_tool_availability():
-    """
-    Check which tools from the registry are available on the system.
-    
-    Returns:
-        Dictionary mapping tool names to availability status (boolean)
-    """
-    tools = get_tools_registry()
-    availability = {}
-    
-    for tool in tools:
-        if isinstance(tool, dict) and "name" in tool:
-            # Check if the tool is in the PATH
-            tool_name = tool["name"]
-            tool_path = shutil.which(tool_name)
-            availability[tool_name] = bool(tool_path)
-    
-    return availability
+    return DEFAULT_TOOLS
 
 def add_tool_to_registry(name, category, description, common_usage, examples=None):
-    """
-    Add a new tool to the registry (legacy function for backward compatibility).
-    
-    Args:
-        name: Tool name
-        category: Tool category
-        description: Tool description
-        common_usage: Tool common usage pattern
-        examples: Optional list of example commands
-        
-    Returns:
-        Boolean indicating success
-    """
+    """Add a new tool to the registry."""
     if examples is None:
         examples = []
     
-    tool = {
-        "name": name,
+    # Create directory if it doesn't exist
+    custom_registry_dir = "/usr/local/share/paw/tools"
+    custom_registry_path = os.path.join(custom_registry_dir, "custom_registry.json")
+    
+    os.makedirs(custom_registry_dir, exist_ok=True)
+    
+    # Load existing registry or create a new one
+    if os.path.exists(custom_registry_path):
+        try:
+            with open(custom_registry_path, 'r') as f:
+                custom_registry = json.load(f)
+        except Exception:
+            custom_registry = {}
+    else:
+        custom_registry = {}
+    
+    # Add the new tool
+    custom_registry[name] = {
         "category": category,
         "description": description,
         "common_usage": common_usage,
         "examples": examples
     }
     
-    return register_tool(tool)
+    # Save the updated registry
+    with open(custom_registry_path, 'w') as f:
+        json.dump(custom_registry, f, indent=4)
+    
+    return True
+
+def get_tools_by_category(category=None):
+    """Get all tools or filter by category."""
+    tools = get_tools_registry()
+    
+    if category:
+        return {name: info for name, info in tools.items() if info.get("category") == category}
+    
+    return tools
+
+def check_tool_availability():
+    """Check which tools from the registry are available on the system."""
+    tools = get_tools_registry()
+    availability = {}
+    
+    for tool_name in tools:
+        # Check if the tool is in the PATH
+        tool_path = shutil.which(tool_name)
+        availability[tool_name] = bool(tool_path)
+    
+    return availability
 
 if __name__ == "__main__":
     # Print the tools registry when run directly

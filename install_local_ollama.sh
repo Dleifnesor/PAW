@@ -247,9 +247,9 @@ EOF
     echo ""
     echo "Local Ollama installation complete."
     echo "The PAW configuration is set to use model: ${MODEL}"
-    read -p "Would you like to pull this model now? (Y/n): " pull_model
+    read -p "Would you like to pull this model now? (y/n): " pull_model
     
-    if [[ ! "$pull_model" =~ ^[Nn]$ ]]; then
+    if [[ "$pull_model" =~ ^[Yy]$ ]]; then
         echo "Pulling model ${MODEL}..."
         echo ""
         echo "This will start a background Ollama server if needed."

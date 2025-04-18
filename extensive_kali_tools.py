@@ -10,37 +10,21 @@ import os
 import sys
 from typing import Dict, List, Any, Optional
 
-# Get the absolute path of the current script
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Add the current directory to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
 
-# Define possible installation paths
-POSSIBLE_INSTALL_PATHS = [
-    '/usr/local/share/paw',  # System-wide installation
-    os.path.join(SCRIPT_DIR, 'lib'),  # Local development
-    SCRIPT_DIR,  # Current directory
-]
-
-# Add all possible paths to Python path, avoiding duplicates
-for path in POSSIBLE_INSTALL_PATHS:
-    if os.path.exists(path) and path not in sys.path:
-        sys.path.insert(0, path)
-
-# Clear any existing duplicate paths
-sys.path = list(dict.fromkeys(sys.path))
-
-# Try importing required modules with fallbacks
+# Try to import the PAW tools registry module
 try:
-    import tools_registry
+    from tools_registry import get_tools_registry, register_tool
 except ImportError:
-    try:
-        from lib import tools_registry
-    except ImportError:
-        print("Error: Could not import PAW tools_registry module.")
-        print("Current Python path:")
-        for path in sys.path:
-            print(f"  - {path}")
-        print("\nMake sure PAW is installed correctly.")
-        sys.exit(1)
+    print("Error: Could not import PAW tools_registry module.")
+    print("Current Python path:")
+    for path in sys.path:
+        print(f"  - {path}")
+    print("\nMake sure PAW is installed correctly and this script is in the correct directory.")
+    print("You can install PAW by running: bash install.sh")
+    sys.exit(1)
 
 # Define tool categories
 CATEGORIES = [
@@ -50,19 +34,18 @@ CATEGORIES = [
     "Database Assessment",
     "Password Attacks",
     "Wireless Attacks",
+    "Bluetooth Attacks",
     "Reverse Engineering",
     "Exploitation Tools",
     "Sniffing & Spoofing",
     "Post Exploitation",
     "Forensics",
     "Reporting Tools",
-    "Social Engineering",
+    "Social Engineering Tools",
     "System Services",
-    "Command & Control"
+    "Cryptography",
+    "Hardware Hacking"
 ]
-
-# Set availability flag
-KALI_TOOLS_AVAILABLE = True
 
 # Comprehensive list of Kali Linux tools with detailed information
 KALI_TOOLS = [
@@ -215,46 +198,38 @@ KALI_TOOLS = [
         ]
     },
     {
-        "name": "gpg2john",
-        "category": "Password Attacks",
-        "description": "Extract hashes from GPG private key files for cracking with John the Ripper",
-        "common_usage": "gpg2john {gpg_file} > {hash_file}",
-        "examples": [
-            {"description": "Extract hash from GPG file", "command": "gpg2john encrypted.gpg > hash.txt"},
-            {"description": "Extract hash from multiple GPG files", "command": "gpg2john *.gpg > hashes.txt"},
-            {"description": "Process a GPG file with spaces in name", "command": "gpg2john \"My Secret File.gpg\" > hash.txt"}
-        ]
-    },
-    {
         "name": "john",
         "category": "Password Attacks",
-        "description": "John the Ripper password cracker for various hash types including GPG",
-        "common_usage": "john [options] {hash_file}",
+        "description": "John the Ripper password cracker with enhanced capabilities",
+        "common_usage": "john [options] {password-file}",
         "examples": [
-            {"description": "Basic password cracking", "command": "john hash.txt"},
-            {"description": "Use specific wordlist", "command": "john --wordlist=/usr/share/wordlists/rockyou.txt hash.txt"},
-            {"description": "Show cracked passwords", "command": "john --show hash.txt"},
-            {"description": "Use rules for wordlist mangling", "command": "john --rules --wordlist=/usr/share/wordlists/rockyou.txt hash.txt"},
-            {"description": "Specify hash format", "command": "john --format=gpg hash.txt"},
-            {"description": "Increment mode (try different password lengths)", "command": "john --incremental hash.txt"},
-            {"description": "Session handling (resume later)", "command": "john --session=mysession hash.txt"},
-            {"description": "Restore previous session", "command": "john --restore=mysession"},
-            {"description": "GPG specific cracking", "command": "john --format=gpg --wordlist=/usr/share/wordlists/rockyou.txt hash.txt"}
+            {"description": "Basic crack", "command": "john hashes.txt"},
+            {"description": "Using wordlist", "command": "john --wordlist=/path/to/wordlist.txt hashes.txt"},
+            {"description": "Incremental mode", "command": "john --incremental hashes.txt"},
+            {"description": "Rule-based attack", "command": "john --rules --wordlist=/path/to/wordlist.txt hashes.txt"},
+            {"description": "Show cracked passwords", "command": "john --show hashes.txt"},
+            {"description": "Format-specific attack", "command": "john --format=nt hashes.txt"},
+            {"description": "Parallel processing", "command": "john --fork=4 hashes.txt"},
+            {"description": "Restore session", "command": "john --restore=session_name"},
+            {"description": "Custom rules", "command": "john --rules=custom --wordlist=/path/to/wordlist.txt hashes.txt"}
         ]
     },
     {
         "name": "hashcat",
         "category": "Password Attacks",
-        "description": "Advanced password recovery utility with GPU acceleration",
-        "common_usage": "hashcat [options] {hash_file} [dictionary|mask]",
+        "description": "Advanced password recovery tool with GPU acceleration",
+        "common_usage": "hashcat [options] {hash-file} [dictionary,mask,directory]",
         "examples": [
-            {"description": "Basic wordlist attack", "command": "hashcat -m 0 -a 0 hash.txt /usr/share/wordlists/rockyou.txt"},
-            {"description": "GPG hash cracking (if supported)", "command": "hashcat -m 16700 -a 0 hash.txt /usr/share/wordlists/rockyou.txt"},
-            {"description": "Use rules for wordlist mangling", "command": "hashcat -m 0 -a 0 -r /usr/share/hashcat/rules/best64.rule hash.txt /usr/share/wordlists/rockyou.txt"},
-            {"description": "Brute force attack with mask", "command": "hashcat -m 0 -a 3 hash.txt ?a?a?a?a?a?a"},
-            {"description": "Show cracked passwords", "command": "hashcat --show hash.txt"},
-            {"description": "Benchmark hash types", "command": "hashcat -b -m 0"},
-            {"description": "Use GPU acceleration", "command": "hashcat -m 0 -a 0 -d 1 hash.txt /usr/share/wordlists/rockyou.txt"}
+            {"description": "Dictionary attack", "command": "hashcat -m 0 -a 0 hashes.txt /path/to/wordlist.txt"},
+            {"description": "Brute force attack", "command": "hashcat -m 0 -a 3 hashes.txt ?a?a?a?a?a?a"},
+            {"description": "Hybrid attack", "command": "hashcat -m 0 -a 6 hashes.txt /path/to/wordlist.txt ?d?d?d"},
+            {"description": "Rule-based attack", "command": "hashcat -m 0 -a 0 hashes.txt /path/to/wordlist.txt -r /path/to/rules.txt"},
+            {"description": "Mask attack with custom charset", "command": "hashcat -m 0 -a 3 hashes.txt -1 ?l?u?d?s ?1?1?1?1?1?1"},
+            {"description": "WPA/WPA2 attack", "command": "hashcat -m 2500 -a 0 capture.hccapx /path/to/wordlist.txt"},
+            {"description": "NTLM attack", "command": "hashcat -m 1000 -a 0 hashes.txt /path/to/wordlist.txt"},
+            {"description": "MD5 attack with GPU", "command": "hashcat -m 0 -a 0 -D 2 hashes.txt /path/to/wordlist.txt"},
+            {"description": "Show cracked passwords", "command": "hashcat -m 0 --show hashes.txt"},
+            {"description": "Resume interrupted session", "command": "hashcat --restore"}
         ]
     },
     
@@ -509,33 +484,18 @@ def add_extensive_kali_tools(only_show: bool = False) -> List[Dict[str, Any]]:
     Returns:
         List of tools that would be or were added
     """
-    try:
-        # Get the tools registry
-        registry = tools_registry.get_tools_registry()
-        
-        # Ensure registry is a list
-        if not isinstance(registry, list):
-            print("Warning: Tools registry is not properly initialized. Creating new registry.")
-            registry = []
-        
-        # Create dictionary of existing tools
-        existing_tools = {}
-        for tool in registry:
-            if isinstance(tool, dict) and "name" in tool:
-                existing_tools[tool["name"].lower()] = tool
-        
-        tools_to_add = []
-        
-        for tool in KALI_TOOLS:
-            if tool["name"].lower() not in existing_tools:
-                tools_to_add.append(tool)
-                if not only_show:
-                    tools_registry.register_tool(tool)
-        
-        return tools_to_add
-    except Exception as e:
-        print(f"Error adding Kali tools: {e}")
-        return []
+    registry = get_tools_registry()
+    existing_tools = {tool["name"].lower(): tool for tool in registry}
+    
+    tools_to_add = []
+    
+    for tool in KALI_TOOLS:
+        if tool["name"].lower() not in existing_tools:
+            tools_to_add.append(tool)
+            if not only_show:
+                register_tool(tool)
+    
+    return tools_to_add
 
 def export_tools(output_file: str) -> None:
     """
@@ -544,7 +504,7 @@ def export_tools(output_file: str) -> None:
     Args:
         output_file: Path to the output JSON file
     """
-    registry = tools_registry.get_tools_registry()
+    registry = get_tools_registry()
     
     with open(output_file, 'w') as f:
         json.dump(registry, f, indent=4)
@@ -562,46 +522,21 @@ def import_tools(input_file: str, only_show: bool = False) -> List[Dict[str, Any
     Returns:
         List of tools that would be or were added
     """
-    try:
-        # Get the tools registry
-        registry = tools_registry.get_tools_registry()
-        
-        # Ensure registry is a list
-        if not isinstance(registry, list):
-            print("Warning: Tools registry is not properly initialized. Creating new registry.")
-            registry = []
-        
-        # Create dictionary of existing tools
-        existing_tools = {}
-        for tool in registry:
-            if isinstance(tool, dict) and "name" in tool:
-                existing_tools[tool["name"].lower()] = tool
-        
-        # Load tools from file
-        with open(input_file, 'r') as f:
-            import_tools = json.load(f)
-        
-        # Convert to list if it's a dictionary
-        if isinstance(import_tools, dict):
-            tools_list = []
-            for name, info in import_tools.items():
-                tool_entry = info.copy()
-                tool_entry['name'] = name
-                tools_list.append(tool_entry)
-            import_tools = tools_list
-        
-        tools_to_add = []
-        
-        for tool in import_tools:
-            if isinstance(tool, dict) and "name" in tool and tool["name"].lower() not in existing_tools:
-                tools_to_add.append(tool)
-                if not only_show:
-                    tools_registry.register_tool(tool)
-        
-        return tools_to_add
-    except Exception as e:
-        print(f"Error importing tools: {e}")
-        return []
+    registry = get_tools_registry()
+    existing_tools = {tool["name"].lower(): tool for tool in registry}
+    
+    with open(input_file, 'r') as f:
+        import_tools = json.load(f)
+    
+    tools_to_add = []
+    
+    for tool in import_tools:
+        if tool["name"].lower() not in existing_tools:
+            tools_to_add.append(tool)
+            if not only_show:
+                register_tool(tool)
+    
+    return tools_to_add
 
 def categorize_tools(tools: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """
@@ -681,7 +616,7 @@ def main() -> None:
             print("\nAll tools are already registered.")
 
 # Add functions to access tool information
-def get_all_kali_tools() -> List[Dict[str, Any]]:
+def get_all_kali_tools():
     """
     Get all available Kali Linux tools.
     
@@ -690,7 +625,7 @@ def get_all_kali_tools() -> List[Dict[str, Any]]:
     """
     return KALI_TOOLS
 
-def get_tool_categories() -> List[str]:
+def get_tool_categories():
     """
     Get all available tool categories.
     
@@ -699,7 +634,7 @@ def get_tool_categories() -> List[str]:
     """
     return CATEGORIES
 
-def get_tools_by_category(category: str) -> List[Dict[str, Any]]:
+def get_tools_by_category(category):
     """
     Get all tools in a specific category.
     
@@ -711,7 +646,7 @@ def get_tools_by_category(category: str) -> List[Dict[str, Any]]:
     """
     return [tool for tool in KALI_TOOLS if tool["category"].lower() == category.lower()]
 
-def get_tool_info(tool_name: str) -> Optional[Dict[str, Any]]:
+def get_tool_info(tool_name):
     """
     Get detailed information about a specific tool.
     
@@ -726,7 +661,7 @@ def get_tool_info(tool_name: str) -> Optional[Dict[str, Any]]:
             return tool
     return None
 
-def search_tools(query: str) -> List[Dict[str, Any]]:
+def search_tools(query):
     """
     Search for tools by name, category, or description.
     
@@ -1580,49 +1515,6 @@ KALI_TOOLS.extend([
          ]
      }
 ])
-
-# Function to scrape and update the tools list from the Kali website (for reference)
-def update_tools_from_kali_website():
-    """
-    Reference function for updating tools from the Kali website.
-    This is not called automatically but can be used to refresh the tool list.
-    Requires internet connection and BeautifulSoup4.
-    """
-    try:
-        import requests
-        from bs4 import BeautifulSoup
-        
-        response = requests.get("https://www.kali.org/tools/all-tools/")
-        if response.status_code != 200:
-            print("Failed to fetch tools list from Kali website")
-            return
-            
-        soup = BeautifulSoup(response.text, 'html.parser')
-        tools = []
-        
-        # This is a simplified parser - actual implementation would need to adapt to the website structure
-        for section in soup.find_all('h3'):
-            category = section.get_text()
-            tool_list = section.find_next('ul')
-            if tool_list:
-                for tool in tool_list.find_all('li'):
-                    tool_name = tool.get_text().strip()
-                    if tool_name:
-                        tools.append({
-                            "name": tool_name,
-                            "category": "Information Gathering",  # Default category, would need proper mapping
-                            "description": "Tool from official Kali Linux repository"
-                        })
-        
-        print(f"Found {len(tools)} tools on the Kali website")
-        return tools
-        
-    except ImportError:
-        print("BeautifulSoup4 and requests are required for web scraping")
-        return []
-    except Exception as e:
-        print(f"Error updating tools from Kali website: {e}")
-        return []
 
 if __name__ == "__main__":
     main() 
