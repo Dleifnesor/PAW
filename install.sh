@@ -123,26 +123,26 @@ touch "$INSTALL_DIR/custom_commands/__init__.py"
 echo "Creating commands..."
 cat > "$BIN_DIR/PAW" << 'EOF'
 #!/bin/bash
-python3 /usr/local/share/paw/paw.py "$@"
+PYTHONPATH="/usr/local/share/paw:/usr/local/share/paw/lib" python3 /usr/local/share/paw/paw.py "$@"
 EOF
 chmod +x "$BIN_DIR/PAW"
 
 # Also create lowercase command for compatibility
 cat > "$BIN_DIR/paw" << 'EOF'
 #!/bin/bash
-python3 /usr/local/share/paw/paw.py "$@"
+PYTHONPATH="/usr/local/share/paw:/usr/local/share/paw/lib" python3 /usr/local/share/paw/paw.py "$@"
 EOF
 chmod +x "$BIN_DIR/paw"
 
 cat > "$BIN_DIR/add-paw-tool" << 'EOF'
 #!/bin/bash
-python3 /usr/local/share/paw/add_custom_tool.py "$@"
+PYTHONPATH="/usr/local/share/paw:/usr/local/share/paw/lib" python3 /usr/local/share/paw/add_custom_tool.py "$@"
 EOF
 chmod +x "$BIN_DIR/add-paw-tool"
 
 cat > "$BIN_DIR/paw-kali-tools" << 'EOF'
 #!/bin/bash
-python3 /usr/local/share/paw/extensive_kali_tools.py "$@"
+PYTHONPATH="/usr/local/share/paw:/usr/local/share/paw/lib" python3 /usr/local/share/paw/extensive_kali_tools.py "$@"
 EOF
 chmod +x "$BIN_DIR/paw-kali-tools"
 
@@ -217,12 +217,16 @@ fi
 # Run extensive_kali_tools.py to populate the tool registry
 if [ -f "$INSTALL_DIR/extensive_kali_tools.py" ]; then
   echo "Populating Kali Linux tools registry..."
-  if python3 "$INSTALL_DIR/extensive_kali_tools.py"; then
+  
+  # Set PYTHONPATH to include both the installation directory and lib directory
+  PYTHONPATH="$INSTALL_DIR:$INSTALL_DIR/lib" python3 "$INSTALL_DIR/extensive_kali_tools.py"
+  
+  if [ $? -eq 0 ]; then
     echo "Kali tools registry populated successfully."
   else
     echo "Warning: Failed to populate Kali tools registry. You can run 'paw-kali-tools' manually after installation."
     echo "Error details:"
-    python3 "$INSTALL_DIR/extensive_kali_tools.py" 2>&1
+    PYTHONPATH="$INSTALL_DIR:$INSTALL_DIR/lib" python3 "$INSTALL_DIR/extensive_kali_tools.py"
   fi
 else
   echo "Note: extensive_kali_tools.py not found. Kali tools functionality will be limited."
@@ -248,10 +252,22 @@ fi
 
 # Check Python modules
 echo -n "Checking Python modules: "
-if python3 -c "import sys; sys.path.append('$INSTALL_DIR/lib'); import ascii_art, tools_registry; print('OK')" 2>/dev/null; then
+if python3 -c "import sys; sys.path.append('$INSTALL_DIR'); sys.path.append('$INSTALL_DIR/lib'); import os; print('Python path:'); [print(f'  - {p}') for p in sys.path]; try: import tools_registry, ascii_art; print('Module imports successful'); except ImportError as e: print(f'Module import failed: {e}'); sys.exit(1)" 2>/dev/null; then
   echo "All required Python modules can be imported."
 else 
-  echo "WARNING: Python modules could not be imported. Check your installation."
+  echo "WARNING: Python modules could not be imported. Attempting to fix..."
+  
+  # Create a symbolic link as a fallback
+  echo "Creating symbolic links for modules in lib directory..."
+  ln -sf "$INSTALL_DIR/tools_registry.py" "$INSTALL_DIR/lib/tools_registry.py" 2>/dev/null
+  ln -sf "$INSTALL_DIR/ascii_art.py" "$INSTALL_DIR/lib/ascii_art.py" 2>/dev/null
+  
+  # Check again after fix
+  if python3 -c "import sys; sys.path.append('$INSTALL_DIR'); sys.path.append('$INSTALL_DIR/lib'); import tools_registry, ascii_art; print('OK')" 2>/dev/null; then
+    echo "Module import issue fixed."
+  else
+    echo "WARNING: Python modules still could not be imported. Please check your installation manually."
+  fi
 fi
 
 # Install the rich library for improved UI

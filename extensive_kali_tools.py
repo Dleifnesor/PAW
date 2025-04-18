@@ -10,13 +10,31 @@ import os
 import sys
 from typing import Dict, List, Any, Optional
 
-# Add the current directory to Python path
+# Set up import paths for the tools_registry module
+# First, try to find the module in standard installation paths
+INSTALL_DIR = '/usr/local/share/paw'
+if os.path.exists(INSTALL_DIR) and INSTALL_DIR not in sys.path:
+    sys.path.insert(0, INSTALL_DIR)
+
+# Then add the current directory to the path
 current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(current_dir)
+if current_dir != INSTALL_DIR and current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+# Add lib directories to path as well
+for lib_path in [os.path.join(INSTALL_DIR, 'lib'), os.path.join(current_dir, 'lib')]:
+    if os.path.exists(lib_path) and lib_path not in sys.path:
+        sys.path.append(lib_path)
 
 # Try to import the PAW tools registry module
 try:
-    from tools_registry import get_tools_registry, register_tool
+    try:
+        # First try direct import
+        from tools_registry import get_tools_registry, register_tool
+    except ImportError:
+        # If that fails, try importing from lib directory
+        sys.path.append(os.path.join(current_dir, 'lib'))
+        from tools_registry import get_tools_registry, register_tool
 except ImportError:
     print("Error: Could not import PAW tools_registry module.")
     print("Current Python path:")
