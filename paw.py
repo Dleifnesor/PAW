@@ -19,19 +19,17 @@ import socket
 # Primary installation directory
 INSTALL_DIR = '/usr/local/share/paw'
 
-# Add the installation directory to Python path 
-if os.path.exists(INSTALL_DIR) and INSTALL_DIR not in sys.path:
-    sys.path.insert(0, INSTALL_DIR)
+# Add all possible paths to Python path
+paths_to_add = [
+    INSTALL_DIR,
+    os.path.join(INSTALL_DIR, 'lib'),
+    os.path.dirname(os.path.abspath(__file__)),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')
+]
 
-# Add the current directory to Python path for development mode
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir != INSTALL_DIR and current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
-
-# Add lib directories to path as well
-for lib_path in [os.path.join(INSTALL_DIR, 'lib'), os.path.join(current_dir, 'lib')]:
-    if os.path.exists(lib_path) and lib_path not in sys.path:
-        sys.path.append(lib_path)
+for path in paths_to_add:
+    if os.path.exists(path) and path not in sys.path:
+        sys.path.insert(0, path)
 
 # Add extensive_kali_tools import
 try:
@@ -57,19 +55,17 @@ except ImportError:
     print("For a better experience, install rich: pip install rich")
     RICH_AVAILABLE = False
 
-# Try importing required modules from multiple locations
+# Try importing required modules
 try:
-    # First try standard imports
+    # First try direct imports
     try:
         from tools_registry import get_tools_registry
         from ascii_art import display_ascii_art
     except ImportError:
-        # If that fails, try the lib directory
+        # If that fails, try importing from lib directory
         try:
-            # Add lib directory
-            sys.path.append(os.path.join(current_dir, 'lib'))
-            from tools_registry import get_tools_registry
-            from ascii_art import display_ascii_art
+            from lib.tools_registry import get_tools_registry
+            from lib.ascii_art import display_ascii_art
         except ImportError as e:
             print(f"Error: Could not import PAW tools_registry module.")
             print("Current Python path:")

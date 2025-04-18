@@ -11,37 +11,39 @@ import sys
 from typing import Dict, List, Any, Optional
 
 # Set up import paths for the tools_registry module
-# First, try to find the module in standard installation paths
 INSTALL_DIR = '/usr/local/share/paw'
-if os.path.exists(INSTALL_DIR) and INSTALL_DIR not in sys.path:
-    sys.path.insert(0, INSTALL_DIR)
 
-# Then add the current directory to the path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir != INSTALL_DIR and current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+# Add all possible paths to Python path
+paths_to_add = [
+    INSTALL_DIR,
+    os.path.join(INSTALL_DIR, 'lib'),
+    os.path.dirname(os.path.abspath(__file__)),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')
+]
 
-# Add lib directories to path as well
-for lib_path in [os.path.join(INSTALL_DIR, 'lib'), os.path.join(current_dir, 'lib')]:
-    if os.path.exists(lib_path) and lib_path not in sys.path:
-        sys.path.append(lib_path)
+for path in paths_to_add:
+    if os.path.exists(path) and path not in sys.path:
+        sys.path.insert(0, path)
 
-# Try to import the PAW tools registry module
+# Try importing the PAW tools registry module
 try:
+    # First try direct import
     try:
-        # First try direct import
         from tools_registry import get_tools_registry, register_tool
     except ImportError:
         # If that fails, try importing from lib directory
-        sys.path.append(os.path.join(current_dir, 'lib'))
-        from tools_registry import get_tools_registry, register_tool
-except ImportError:
-    print("Error: Could not import PAW tools_registry module.")
-    print("Current Python path:")
-    for path in sys.path:
-        print(f"  - {path}")
-    print("\nMake sure PAW is installed correctly and this script is in the correct directory.")
-    print("You can install PAW by running: bash install.sh")
+        try:
+            from lib.tools_registry import get_tools_registry, register_tool
+        except ImportError:
+            print("Error: Could not import PAW tools_registry module.")
+            print("Current Python path:")
+            for path in sys.path:
+                print(f"  - {path}")
+            print("\nMake sure PAW is installed correctly and this script is in the correct directory.")
+            print("You can install PAW by running: bash install.sh")
+            sys.exit(1)
+except Exception as e:
+    print(f"Unexpected error: {e}")
     sys.exit(1)
 
 # Define tool categories
