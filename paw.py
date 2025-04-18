@@ -105,8 +105,27 @@ else:
         CONFIG_PATH = "./paw-local-config.ini"
         config.read(CONFIG_PATH)
     else:
-        logger.error(f"Configuration file not found: {CONFIG_PATH}")
-        sys.exit(1)
+        # Create default config
+        try:
+            os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+            with open(CONFIG_PATH, 'w') as f:
+                f.write("""[DEFAULT]
+model = qwen2.5-coder:7b
+ollama_host = http://localhost:11434
+explain_commands = true
+log_commands = true
+log_directory = /var/log/paw
+llm_timeout = 600.0
+command_timeout = 600.0
+theme = cyberpunk
+adaptive_mode = false
+""")
+            print(f"Created default config at {CONFIG_PATH}")
+            config.read(CONFIG_PATH)
+        except Exception as e:
+            logger.error(f"Failed to create default config: {e}")
+            logger.error(f"Configuration file not found: {CONFIG_PATH}")
+            sys.exit(1)
 
 MODEL = config['DEFAULT'].get('model', 'qwen2.5-coder:7b')
 OLLAMA_HOST = config['DEFAULT'].get('ollama_host', 'http://localhost:11434')
@@ -1876,7 +1895,7 @@ def main():
     
     # Display ASCII art
     if ascii_art:
-        ascii_art.display()
+        ascii_art.display_ascii_art()
     
     # Show fancy header if rich is available
     if RICH_AVAILABLE:

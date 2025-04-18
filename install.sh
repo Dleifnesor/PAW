@@ -87,15 +87,33 @@ fi
 
 echo "Installing PAW - Prompt Assisted Workflow..."
 
-# Create directories
-echo "Creating directories..."
-mkdir -p "$INSTALL_DIR"
-mkdir -p "$INSTALL_DIR/lib"
-mkdir -p "$INSTALL_DIR/tools"
-mkdir -p "$INSTALL_DIR/custom_commands"
-mkdir -p "$CONFIG_DIR"
-mkdir -p "$DOC_DIR"
-mkdir -p "$LOG_DIR"
+# Create necessary directories
+sudo mkdir -p "$INSTALL_DIR"
+sudo mkdir -p "$INSTALL_DIR/lib"
+sudo mkdir -p "$INSTALL_DIR/tools"
+sudo mkdir -p "$BIN_DIR"
+sudo mkdir -p "/etc/paw"
+sudo mkdir -p "/var/log/paw"
+
+# Set proper permissions for log directory
+sudo chmod 777 "/var/log/paw"
+
+# Create default config file if it doesn't exist
+if [ ! -f "/etc/paw/config.ini" ]; then
+    sudo cat > "/etc/paw/config.ini" << 'EOF'
+[DEFAULT]
+model = qwen2.5-coder:7b
+ollama_host = http://localhost:11434
+explain_commands = true
+log_commands = true
+log_directory = /var/log/paw
+llm_timeout = 600.0
+command_timeout = 600.0
+theme = cyberpunk
+adaptive_mode = false
+EOF
+    echo "Created default configuration file at /etc/paw/config.ini"
+fi
 
 # Copy files
 echo "Copying files..."
@@ -119,17 +137,32 @@ cp README_KALI_TOOLS.md "$DOC_DIR/" 2>/dev/null || echo "Note: README_KALI_TOOLS
 touch "$INSTALL_DIR/lib/__init__.py"
 touch "$INSTALL_DIR/custom_commands/__init__.py"
 
-# Create commands
-echo "Creating commands..."
+# Create PAW command wrapper
 cat > "$BIN_DIR/PAW" << 'EOF'
 #!/bin/bash
+# Check if Ollama is running
+if ! curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+  echo "Error: Ollama is not running. Please start Ollama first."
+  echo "  Start with: ollama serve"
+  exit 1
+fi
+
+# Run PAW with proper Python path
 PYTHONPATH="/usr/local/share/paw:/usr/local/share/paw/lib" python3 /usr/local/share/paw/paw.py "$@"
 EOF
 chmod +x "$BIN_DIR/PAW"
 
-# Also create lowercase command for compatibility
+# Create lowercase command for compatibility
 cat > "$BIN_DIR/paw" << 'EOF'
 #!/bin/bash
+# Check if Ollama is running
+if ! curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+  echo "Error: Ollama is not running. Please start Ollama first."
+  echo "  Start with: ollama serve"
+  exit 1
+fi
+
+# Run PAW with proper Python path
 PYTHONPATH="/usr/local/share/paw:/usr/local/share/paw/lib" python3 /usr/local/share/paw/paw.py "$@"
 EOF
 chmod +x "$BIN_DIR/paw"
@@ -161,24 +194,6 @@ fi
 # Make custom command scripts executable
 chmod +x "$INSTALL_DIR/custom_commands"/*.py 2>/dev/null || echo "No custom commands to make executable"
 
-# Create default configuration
-if [ ! -f "$CONFIG_DIR/config.ini" ]; then
-  echo "Creating default configuration..."
-  cat > "$CONFIG_DIR/config.ini" << 'EOF'
-[DEFAULT]
-model = qwen2.5-coder:7b
-ollama_host = http://localhost:11434
-explain_commands = true
-log_commands = true
-log_directory = /var/log/paw
-llm_timeout = 180.0
-command_timeout = 180.0
-auto_retry = true
-chain_commands = true
-adaptive_mode = true
-EOF
-fi
-
 # Set permissions
 echo "Setting permissions..."
 chown -R root:root "$INSTALL_DIR"
@@ -188,86 +203,74 @@ chmod 644 "$CONFIG_DIR/config.ini"
 chmod -R 777 "$LOG_DIR"  # Allow all users to write logs
 chmod -R 755 "$DOC_DIR"
 
-# Check if Kali Linux is detected
-if [ -f "/etc/os-release" ] && grep -q "Kali" /etc/os-release; then
-  echo "Kali Linux detected. Setting up Kali tools integration..."
-  
-  # Check for required Kali tools
-  echo "Checking for required Kali tools..."
-  REQUIRED_TOOLS=("nmap" "hydra" "sqlmap" "metasploit-framework" "aircrack-ng" "john" "hashcat")
-  MISSING_TOOLS=()
-  
-  for tool in "${REQUIRED_TOOLS[@]}"; do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-      MISSING_TOOLS+=("$tool")
+# Check if running on Kali Linux and set up Kali tools
+echo "Checking for Kali Linux..."
+if [ -f /etc/os-release ] && grep -q "Kali" /etc/os-release; then
+    echo "Kali Linux detected. Setting up Kali tools integration..."
+    
+    # Check for required tools
+    echo "Checking for required Kali tools..."
+    MISSING_TOOLS=""
+    for tool in nmap nikto metasploit-framework; do
+        if ! command -v $tool &> /dev/null && ! dpkg -l | grep -q $tool; then
+            if [ -n "$MISSING_TOOLS" ]; then
+                MISSING_TOOLS="$MISSING_TOOLS $tool"
+            else
+                MISSING_TOOLS="$tool"
+            fi
+        fi
+    done
+    
+    if [ -n "$MISSING_TOOLS" ]; then
+        echo "Some recommended Kali tools are not installed: $MISSING_TOOLS"
+        read -p "Would you like to install these tools? (y/n): " INSTALL_TOOLS
+        if [ "$INSTALL_TOOLS" = "y" ]; then
+            sudo apt-get update
+            sudo apt-get install -y $MISSING_TOOLS
+        fi
     fi
-  done
-  
-  if [ ${#MISSING_TOOLS[@]} -ne 0 ]; then
-    echo "Some recommended Kali tools are not installed: ${MISSING_TOOLS[*]}"
-    read -p "Would you like to install these tools? (y/n): " install_tools
-    if [[ "$install_tools" =~ ^[Yy]$ ]]; then
-      echo "Installing recommended Kali tools..."
-      apt-get update
-      apt-get install -y "${MISSING_TOOLS[@]}"
+    
+    # Initialize Kali tools
+    echo "Populating Kali Linux tools registry..."
+    if [ -f "$INSTALL_DIR/extensive_kali_tools.py" ]; then
+        # Run with clear error handling
+        if ! PYTHONPATH="$INSTALL_DIR:$INSTALL_DIR/lib" python3 "$INSTALL_DIR/extensive_kali_tools.py"; then
+            echo "Warning: Failed to populate Kali tools registry. You can run 'paw-kali-tools' manually after installation."
+            echo "Error details:"
+            PYTHONPATH="$INSTALL_DIR:$INSTALL_DIR/lib" python3 "$INSTALL_DIR/extensive_kali_tools.py" 2>&1 || true
+        fi
+    else
+        echo "Warning: extensive_kali_tools.py not found. Kali tools functionality will be limited."
     fi
-  fi
 fi
 
-# Run extensive_kali_tools.py to populate the tool registry
-if [ -f "$INSTALL_DIR/extensive_kali_tools.py" ]; then
-  echo "Populating Kali Linux tools registry..."
-  
-  # Set PYTHONPATH to include both the installation directory and lib directory
-  PYTHONPATH="$INSTALL_DIR:$INSTALL_DIR/lib" python3 "$INSTALL_DIR/extensive_kali_tools.py"
-  
-  if [ $? -eq 0 ]; then
-    echo "Kali tools registry populated successfully."
-  else
-    echo "Warning: Failed to populate Kali tools registry. You can run 'paw-kali-tools' manually after installation."
-    echo "Error details:"
-    PYTHONPATH="$INSTALL_DIR:$INSTALL_DIR/lib" python3 "$INSTALL_DIR/extensive_kali_tools.py"
-  fi
-else
-  echo "Note: extensive_kali_tools.py not found. Kali tools functionality will be limited."
-  echo "You can manually add Kali tools later using 'paw-kali-tools' if you install the file."
-fi
-
-# Verifying installation...
+# Verify installation
 echo "Verifying installation..."
 
-# Check commands
+# Check command availability
 echo -n "Checking command availability: "
-COMMANDS_OK=true
-for cmd in "PAW" "paw" "add-paw-tool" "paw-config" "paw-kali-tools"; do
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    echo "WARNING: $cmd command is not in path."
-    COMMANDS_OK=false
-  fi
-done
-
-if [ "$COMMANDS_OK" = true ]; then
-  echo "All commands are available."
+if command -v paw >/dev/null 2>&1 && command -v PAW >/dev/null 2>&1; then
+    echo "All commands are available."
+else
+    echo "FAILED. Command 'paw' or 'PAW' not found in path."
+    echo "Try running: sudo ln -s $BIN_DIR/paw /usr/local/bin/paw"
 fi
 
 # Check Python modules
 echo -n "Checking Python modules: "
 if python3 -c "import sys; sys.path.append('$INSTALL_DIR'); sys.path.append('$INSTALL_DIR/lib'); import os; print('Python path:'); [print(f'  - {p}') for p in sys.path]; try: import tools_registry, ascii_art; print('Module imports successful'); except ImportError as e: print(f'Module import failed: {e}'); sys.exit(1)" 2>/dev/null; then
-  echo "All required Python modules can be imported."
-else 
-  echo "WARNING: Python modules could not be imported. Attempting to fix..."
-  
-  # Create a symbolic link as a fallback
-  echo "Creating symbolic links for modules in lib directory..."
-  ln -sf "$INSTALL_DIR/tools_registry.py" "$INSTALL_DIR/lib/tools_registry.py" 2>/dev/null
-  ln -sf "$INSTALL_DIR/ascii_art.py" "$INSTALL_DIR/lib/ascii_art.py" 2>/dev/null
-  
-  # Check again after fix
-  if python3 -c "import sys; sys.path.append('$INSTALL_DIR'); sys.path.append('$INSTALL_DIR/lib'); import tools_registry, ascii_art; print('OK')" 2>/dev/null; then
-    echo "Module import issue fixed."
-  else
-    echo "WARNING: Python modules still could not be imported. Please check your installation manually."
-  fi
+    echo "OK"
+else
+    echo "WARNING: Python modules could not be imported. Attempting to fix..."
+    # Create symbolic links for modules in lib directory
+    echo "Creating symbolic links for modules in lib directory..."
+    ln -sf "$INSTALL_DIR/tools_registry.py" "$INSTALL_DIR/lib/"
+    ln -sf "$INSTALL_DIR/ascii_art.py" "$INSTALL_DIR/lib/"
+    if python3 -c "import sys; sys.path.append('$INSTALL_DIR/lib'); try: import tools_registry, ascii_art; print('OK'); except ImportError as e: print(f'Still failed: {e}'); sys.exit(1)" 2>/dev/null; then
+        echo "OK"
+    else
+        echo "FAILED. Please check the installation logs."
+    fi
 fi
 
 # Install the rich library for improved UI
@@ -339,16 +342,12 @@ categories = Information Gathering,Vulnerability Analysis,Web Application Analys
 fi
 
 echo ""
-echo "Installation complete!"
-echo "PAW is now installed system-wide and can be executed from anywhere."
+echo "PAW installation complete!"
+echo "Run 'paw' to start or 'paw --help' for options."
+echo "Before running PAW, make sure Ollama is installed and running with:"
+echo "  ollama serve"
 echo ""
-echo "Usage:"
-echo "  PAW \"your natural language command\""
-echo ""
-echo "Additional tools:"
-echo "  add-paw-tool - Register custom tools"
-echo "  paw-config   - Configure PAW settings"
-echo ""
-echo "Documentation: /usr/local/share/doc/paw/"
+echo "To download required models, run:"
+echo "  ollama pull qwen2.5-coder:7b"
 echo ""
 echo "Thank you for installing PAW!" 

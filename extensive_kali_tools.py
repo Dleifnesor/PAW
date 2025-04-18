@@ -503,18 +503,33 @@ def add_extensive_kali_tools(only_show: bool = False) -> List[Dict[str, Any]]:
     Returns:
         List of tools that would be or were added
     """
-    registry = tools_registry.get_tools_registry()
-    existing_tools = {tool["name"].lower(): tool for tool in registry}
-    
-    tools_to_add = []
-    
-    for tool in KALI_TOOLS:
-        if tool["name"].lower() not in existing_tools:
-            tools_to_add.append(tool)
-            if not only_show:
-                tools_registry.register_tool(tool)
-    
-    return tools_to_add
+    try:
+        # Get the tools registry
+        registry = tools_registry.get_tools_registry()
+        
+        # Ensure registry is a list
+        if not isinstance(registry, list):
+            print("Warning: Tools registry is not properly initialized. Creating new registry.")
+            registry = []
+        
+        # Create dictionary of existing tools
+        existing_tools = {}
+        for tool in registry:
+            if isinstance(tool, dict) and "name" in tool:
+                existing_tools[tool["name"].lower()] = tool
+        
+        tools_to_add = []
+        
+        for tool in KALI_TOOLS:
+            if tool["name"].lower() not in existing_tools:
+                tools_to_add.append(tool)
+                if not only_show:
+                    tools_registry.register_tool(tool)
+        
+        return tools_to_add
+    except Exception as e:
+        print(f"Error adding Kali tools: {e}")
+        return []
 
 def export_tools(output_file: str) -> None:
     """
@@ -541,21 +556,46 @@ def import_tools(input_file: str, only_show: bool = False) -> List[Dict[str, Any
     Returns:
         List of tools that would be or were added
     """
-    registry = tools_registry.get_tools_registry()
-    existing_tools = {tool["name"].lower(): tool for tool in registry}
-    
-    with open(input_file, 'r') as f:
-        import_tools = json.load(f)
-    
-    tools_to_add = []
-    
-    for tool in import_tools:
-        if tool["name"].lower() not in existing_tools:
-            tools_to_add.append(tool)
-            if not only_show:
-                tools_registry.register_tool(tool)
-    
-    return tools_to_add
+    try:
+        # Get the tools registry
+        registry = tools_registry.get_tools_registry()
+        
+        # Ensure registry is a list
+        if not isinstance(registry, list):
+            print("Warning: Tools registry is not properly initialized. Creating new registry.")
+            registry = []
+        
+        # Create dictionary of existing tools
+        existing_tools = {}
+        for tool in registry:
+            if isinstance(tool, dict) and "name" in tool:
+                existing_tools[tool["name"].lower()] = tool
+        
+        # Load tools from file
+        with open(input_file, 'r') as f:
+            import_tools = json.load(f)
+        
+        # Convert to list if it's a dictionary
+        if isinstance(import_tools, dict):
+            tools_list = []
+            for name, info in import_tools.items():
+                tool_entry = info.copy()
+                tool_entry['name'] = name
+                tools_list.append(tool_entry)
+            import_tools = tools_list
+        
+        tools_to_add = []
+        
+        for tool in import_tools:
+            if isinstance(tool, dict) and "name" in tool and tool["name"].lower() not in existing_tools:
+                tools_to_add.append(tool)
+                if not only_show:
+                    tools_registry.register_tool(tool)
+        
+        return tools_to_add
+    except Exception as e:
+        print(f"Error importing tools: {e}")
+        return []
 
 def categorize_tools(tools: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """
