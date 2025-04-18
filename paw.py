@@ -16,9 +16,22 @@ import importlib.util
 import re
 import socket
 
-# Add the current directory to Python path
+# Primary installation directory
+INSTALL_DIR = '/usr/local/share/paw'
+
+# Add the installation directory to Python path 
+if os.path.exists(INSTALL_DIR) and INSTALL_DIR not in sys.path:
+    sys.path.insert(0, INSTALL_DIR)
+
+# Add the current directory to Python path for development mode
 current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, current_dir)
+if current_dir != INSTALL_DIR and current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+# Add lib directories to path as well
+for lib_path in [os.path.join(INSTALL_DIR, 'lib'), os.path.join(current_dir, 'lib')]:
+    if os.path.exists(lib_path) and lib_path not in sys.path:
+        sys.path.append(lib_path)
 
 # Add extensive_kali_tools import
 try:
@@ -44,26 +57,30 @@ except ImportError:
     print("For a better experience, install rich: pip install rich")
     RICH_AVAILABLE = False
 
-# Add the PAW lib directory to the Python path
-# Try local lib first, then system path
-local_lib_path = os.path.join(current_dir, 'lib')
-if os.path.exists(local_lib_path):
-    sys.path.append(local_lib_path)
-else:
-    sys.path.append('/usr/local/share/paw/lib')
-
+# Try importing required modules from multiple locations
 try:
-    from ascii_art import display_ascii_art
-    from tools_registry import get_tools_registry
-except ImportError:
-    # Fall back to trying current directory imports
+    # First try standard imports
     try:
-        sys.path.append('.')
-        from ascii_art import display_ascii_art
         from tools_registry import get_tools_registry
+        from ascii_art import display_ascii_art
     except ImportError:
-        print("Error: Could not import required modules. Please make sure you're running from the correct directory.")
-        sys.exit(1)
+        # If that fails, try the lib directory
+        try:
+            # Add lib directory
+            sys.path.append(os.path.join(current_dir, 'lib'))
+            from tools_registry import get_tools_registry
+            from ascii_art import display_ascii_art
+        except ImportError as e:
+            print(f"Error: Could not import PAW tools_registry module.")
+            print("Current Python path:")
+            for path in sys.path:
+                print(f"  - {path}")
+            print("\nMake sure PAW is installed correctly and this script is in the correct directory.")
+            print("You can install PAW by running: bash install.sh")
+            sys.exit(1)
+except Exception as e:
+    print(f"Unexpected error: {e}")
+    sys.exit(1)
 
 # Set up logging
 logging.basicConfig(
