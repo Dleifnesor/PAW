@@ -393,7 +393,11 @@ class PAW:
                     # Get the first tool's example command
                     tool_info = extensive_kali_tools.get_tool_info(relevant_tools[0])
                     if tool_info and "examples" in tool_info and tool_info["examples"]:
-                        return tool_info["examples"][0]["command"]
+                        command = tool_info["examples"][0]["command"]
+                        # Ensure command starts with sudo if it doesn't already
+                        if not command.strip().startswith("sudo "):
+                            return f"sudo {command}"
+                        return command
             except Exception as e:
                 print(f"Warning: Error generating command from Kali tools: {e}")
         
@@ -1454,8 +1458,13 @@ The command should directly use the values from the previous output when appropr
         
         # Only return the first command if approved
         if commands and explanations:
-            if self.display_single_command(commands[0], explanations[0], 1, len(commands)):
-                return [commands[0]], self.adaptive_mode
+            # Ensure command has sudo prefix
+            command = commands[0]
+            if not command.strip().startswith("sudo "):
+                command = f"sudo {command}"
+            
+            if self.display_single_command(command, explanations[0], 1, len(commands)):
+                return [command], self.adaptive_mode
         
         # If user doesn't approve the first command or there are no commands
         return [], self.adaptive_mode
@@ -1685,21 +1694,14 @@ The command should directly use the values from the previous output when appropr
         
         # Build context for command generation
         context = [
-            "You are a helpful Linux command assistant. Generate appropriate commands based on the user's request.",
+            "You are a helpful Kali Linux command assistant. Generate commands based on the user's request.",
             "You must return a JSON object with the following structure: {\"plan\": [steps], \"commands\": [commands], \"explanation\": [explanations]}",
-            "IMPORTANT: Your commands MUST directly address the user's request and be appropriate for their system.",
+            "IMPORTANT: Your commands MUST directly address the user's request and be appropriate for their system, the user is always right, and you are not to question the user's request.",
             "Use the correct tools based on the user's request (e.g., macchanger for MAC address changes, nmap for scanning).",
-            f"ALWAYS run commands as root (use sudo) when accessing privileged resources.",
+            f"ALWAYS prefix ALL commands with sudo to ensure sufficient permissions.",
             "If a command requires an interface, use: " + (interfaces[0] if interfaces else detected_interface or "eth0"),
             "If a command requires a local IP, use: " + (ip_addresses[0] if ip_addresses else local_ip or "127.0.0.1"),
         ]
-        
-        # Add specialized guidance for specific request types
-        if is_mac_change_request:
-            context.append("For MAC address changes, use macchanger. First check the current MAC with ifconfig or ip link, then use macchanger -r <interface> for a random MAC.")
-        
-        if is_password_request and "gpg" in request.lower():
-            context.append("For GPG password cracking, use gpg2john to extract the hash, then john to crack it.")
         
         # Add Kali tools guidance from extensive_kali_tools if available
         if extensive_kali_tools and extensive_kali_tools.KALI_TOOLS_AVAILABLE:
@@ -1791,6 +1793,12 @@ The command should directly use the values from the previous output when appropr
             # Extract the plan, commands, and explanations
             plan = response.get("plan", ["Execute the requested task"])
             commands = response.get("commands", [])
+            
+            # Ensure all commands have sudo prefix
+            for i in range(len(commands)):
+                if commands[i] and not commands[i].strip().startswith("sudo "):
+                    commands[i] = f"sudo {commands[i]}"
+            
             explanations = response.get("explanation", [])
 
             # Make sure explanations match commands in length

@@ -15,7 +15,7 @@ fi
 if [ -f "./install_local_ollama.sh" ]; then
   echo ""
   echo "Local Ollama installer detected."
-  read -p "Would you like to install Ollama locally in the current directory instead of system-wide? (y/n): " install_local
+  read -p "Would you like to install Ollama locally in the current directory instead of system-wide? (y/N): " install_local
   
   if [[ "$install_local" =~ ^[Yy]$ ]]; then
     echo "Running local Ollama installer..."
@@ -44,9 +44,12 @@ LOG_DIR="/var/log/paw"
 # Check if Ollama is installed
 if ! command -v ollama >/dev/null 2>&1; then
   echo "Ollama is not installed, which is required for PAW."
-  read -p "Would you like to install Ollama now? (y/n): " install_ollama
+  read -p "Would you like to install Ollama now? (Y/n): " install_ollama
   
-  if [[ "$install_ollama" =~ ^[Yy]$ ]]; then
+  if [[ "$install_ollama" =~ ^[Nn]$ ]]; then
+    echo "Continuing without installing Ollama. Note that PAW requires Ollama to function."
+    echo "Please visit https://ollama.ai/download to install Ollama manually."
+  else
     echo "Installing Ollama..."
     
     # Detect OS
@@ -79,9 +82,6 @@ if ! command -v ollama >/dev/null 2>&1; then
       echo "Please visit https://ollama.ai/download for installation instructions."
       read -p "Press Enter to continue with PAW installation..." 
     fi
-  else
-    echo "Continuing without installing Ollama. Note that PAW requires Ollama to function."
-    echo "Please visit https://ollama.ai/download to install Ollama manually."
   fi
 fi
 
@@ -223,8 +223,8 @@ if [ -f /etc/os-release ] && grep -q "Kali" /etc/os-release; then
     
     if [ -n "$MISSING_TOOLS" ]; then
         echo "Some recommended Kali tools are not installed: $MISSING_TOOLS"
-        read -p "Would you like to install these tools? (y/n): " INSTALL_TOOLS
-        if [ "$INSTALL_TOOLS" = "y" ]; then
+        read -p "Would you like to install these tools? (Y/n): " INSTALL_TOOLS
+        if [[ ! "$INSTALL_TOOLS" =~ ^[Nn]$ ]]; then
             sudo apt-get update
             sudo apt-get install -y $MISSING_TOOLS
         fi
@@ -279,8 +279,8 @@ if python3 -c "import rich" 2>/dev/null; then
   echo "rich library is already installed."
 else
   echo "rich library not found."
-  read -p "Would you like to install the rich library for enhanced UI? (y/n): " install_rich
-  if [[ "$install_rich" =~ ^[Yy]$ ]]; then
+  read -p "Would you like to install the rich library for enhanced UI? (Y/n): " install_rich
+  if [[ ! "$install_rich" =~ ^[Nn]$ ]]; then
     echo "Installing rich library..."
     pip3 install rich || {
       echo "Failed to install using pip3, trying with pip..."
@@ -313,13 +313,13 @@ if command -v ollama >/dev/null 2>&1; then
       echo "Configured model '$MODEL' is available."
     else
       echo "WARNING: Configured model '$MODEL' is not available in Ollama."
-      read -p "Would you like to pull this model now? (y/n): " pull_model
-      if [[ "$pull_model" =~ ^[Yy]$ ]]; then
-        echo "Pulling model $MODEL (this may take a while)..."
-        ollama pull "$MODEL"
-      else
+      read -p "Would you like to pull this model now? (Y/n): " pull_model
+      if [[ "$pull_model" =~ ^[Nn]$ ]]; then
         echo "You can pull the model later with: ollama pull $MODEL"
         echo "Or change the model in /etc/paw/config.ini with: sudo paw-config"
+      else
+        echo "Pulling model $MODEL (this may take a while)..."
+        ollama pull "$MODEL"
       fi
     fi
   else
