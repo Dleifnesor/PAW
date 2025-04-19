@@ -20,6 +20,9 @@ import platform
 import requests
 from bs4 import BeautifulSoup
 
+# Version information
+VERSION = "1.0.0"
+
 # Get the absolute path of the current script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
