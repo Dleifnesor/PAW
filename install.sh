@@ -138,34 +138,52 @@ touch "$INSTALL_DIR/lib/__init__.py"
 touch "$INSTALL_DIR/custom_commands/__init__.py"
 
 # Create PAW command wrapper
-cat > "$BIN_DIR/PAW" << 'EOF'
-#!/bin/bash
-# Check if Ollama is running
-if ! curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
-  echo "Error: Ollama is not running. Please start Ollama first."
-  echo "  Start with: ollama serve"
-  exit 1
-fi
-
-# Run PAW with proper Python path
-PYTHONPATH="/usr/local/share/paw:/usr/local/share/paw/lib" python3 /usr/local/share/paw/paw.py "$@"
-EOF
-chmod +x "$BIN_DIR/PAW"
-
-# Create lowercase command for compatibility
 cat > "$BIN_DIR/paw" << 'EOF'
 #!/bin/bash
-# Check if Ollama is running
-if ! curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
-  echo "Error: Ollama is not running. Please start Ollama first."
-  echo "  Start with: ollama serve"
-  exit 1
+
+# Set up environment
+PAW_DIR="/usr/local/share/paw"
+PAW_LIB_DIR="$PAW_DIR/lib"
+PYTHONPATH="$PAW_DIR:$PAW_LIB_DIR:$PYTHONPATH"
+
+# Ensure required directories exist
+mkdir -p "/etc/paw"
+mkdir -p "/var/log/paw"
+chmod 777 "/var/log/paw" 2>/dev/null || true
+
+# Check if config exists, create if not
+if [ ! -f "/etc/paw/config.ini" ]; then
+    cat > "/etc/paw/config.ini" << 'CONFIG'
+[DEFAULT]
+model = qwen2.5-coder:7b
+ollama_host = http://localhost:11434
+explain_commands = true
+log_commands = true
+log_directory = /var/log/paw
+llm_timeout = 600.0
+command_timeout = 600.0
+theme = cyberpunk
+adaptive_mode = false
+use_sudo = false
+CONFIG
+    chmod 644 "/etc/paw/config.ini"
 fi
 
-# Run PAW with proper Python path
-PYTHONPATH="/usr/local/share/paw:/usr/local/share/paw/lib" python3 /usr/local/share/paw/paw.py "$@"
+# Check if Ollama is running
+if ! curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+    echo "Error: Ollama is not running. Please start Ollama first."
+    echo "  Start with: ollama serve"
+    exit 1
+fi
+
+# Run PAW with proper environment
+export PYTHONPATH
+python3 "$PAW_DIR/paw.py" "$@"
 EOF
 chmod +x "$BIN_DIR/paw"
+
+# Create lowercase command for compatibility
+ln -sf "$BIN_DIR/paw" "$BIN_DIR/PAW"
 
 cat > "$BIN_DIR/add-paw-tool" << 'EOF'
 #!/bin/bash

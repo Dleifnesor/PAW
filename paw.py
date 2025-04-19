@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+# Standard library imports
 import os
 import sys
 import json
@@ -8,45 +9,33 @@ import logging
 import uuid
 import time
 import re
-from datetime import datetime
-import httpx
-import importlib.util
-import re
 import socket
-from typing import List, Dict, Optional
 import platform
+import argparse
+import configparser
+from datetime import datetime
+from typing import List, Dict, Optional, Tuple, Union, Any
+
+# Third-party imports
+import httpx
 import requests
 from bs4 import BeautifulSoup
-import configparser
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.syntax import Syntax
+from rich.table import Table
+from rich.prompt import Prompt, Confirm
+from rich.markdown import Markdown
+from rich.live import Live
+from rich.layout import Layout
 
-# Import extensive_kali_tools
+# Local imports
 try:
     import extensive_kali_tools
 except ImportError:
     print("Warning: Could not import extensive_kali_tools module.")
 
-# Version information
-VERSION = "1.0.0"
-
-# Get the absolute path of the current script
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Define possible installation paths
-POSSIBLE_INSTALL_PATHS = [
-    '/usr/local/share/paw',  # System-wide installation
-    os.path.join(SCRIPT_DIR, 'lib'),  # Local development
-    SCRIPT_DIR,  # Current directory
-]
-
-# Add all possible paths to Python path, avoiding duplicates
-for path in POSSIBLE_INSTALL_PATHS:
-    if os.path.exists(path) and path not in sys.path:
-        sys.path.insert(0, path)
-
-# Clear any existing duplicate paths
-sys.path = list(dict.fromkeys(sys.path))
-
-# Try importing required modules with fallbacks
 try:
     import tools_registry
 except ImportError:
@@ -69,21 +58,26 @@ except ImportError:
         print("Warning: Could not import ascii_art module. Some features may be limited.")
         ascii_art = None
 
-# Add rich library for fancy UI
-try:
-    from rich.console import Console
-    from rich.panel import Panel
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
-    from rich.syntax import Syntax
-    from rich.table import Table
-    from rich.prompt import Prompt, Confirm
-    from rich.markdown import Markdown
-    from rich.live import Live
-    from rich.layout import Layout
-    RICH_AVAILABLE = True
-except ImportError:
-    print("For a better experience, install rich: pip install rich")
-    RICH_AVAILABLE = False
+# Version information
+VERSION = "1.0.0"
+
+# Get the absolute path of the current script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Define possible installation paths
+POSSIBLE_INSTALL_PATHS = [
+    '/usr/local/share/paw',  # System-wide installation
+    os.path.join(SCRIPT_DIR, 'lib'),  # Local development
+    SCRIPT_DIR,  # Current directory
+]
+
+# Add all possible paths to Python path, avoiding duplicates
+for path in POSSIBLE_INSTALL_PATHS:
+    if os.path.exists(path) and path not in sys.path:
+        sys.path.insert(0, path)
+
+# Clear any existing duplicate paths
+sys.path = list(dict.fromkeys(sys.path))
 
 # Set up logging
 logging.basicConfig(
@@ -95,9 +89,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger('PAW')
 
+# Check if rich is available
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+    from rich.syntax import Syntax
+    from rich.table import Table
+    from rich.prompt import Prompt, Confirm
+    from rich.markdown import Markdown
+    from rich.live import Live
+    from rich.layout import Layout
+    RICH_AVAILABLE = True
+    console = Console()
+except ImportError:
+    print("For a better experience, install rich: pip install rich")
+    RICH_AVAILABLE = False
+    console = None
+
 # Configuration
 # Check for environment variable for config path first, otherwise use default
-CONFIG_PATH = os.environ.get("PAW_CONFIG", os.path.join(os.path.expanduser("~"), ".config", "paw", "config.ini"))
+CONFIG_PATH = os.environ.get("PAW_CONFIG", "/etc/paw/config.ini")
 config = configparser.ConfigParser()
 
 # Create config directory if it doesn't exist
@@ -112,7 +124,7 @@ if not os.path.exists(CONFIG_PATH):
             'ollama_host': 'http://localhost:11434',
             'explain_commands': 'true',
             'log_commands': 'true',
-            'log_directory': '~/.local/share/paw/logs',
+            'log_directory': '/var/log/paw',
             'llm_timeout': '600.0',
             'command_timeout': '600.0',
             'theme': 'cyberpunk',
@@ -134,7 +146,7 @@ except Exception as e:
     sys.exit(1)
 
 # Expand user directory in paths
-LOG_DIRECTORY = os.path.expanduser(config['DEFAULT'].get('log_directory', '~/.local/share/paw/logs'))
+LOG_DIRECTORY = config['DEFAULT'].get('log_directory', '/var/log/paw')
 
 # Create log directory if it doesn't exist
 os.makedirs(LOG_DIRECTORY, exist_ok=True)
