@@ -723,7 +723,7 @@ class PAW:
                     # Try with explicit relative path
                     fixed_command = command.replace(file_path, "./" + file_path)
                     suggestion = f"Adding explicit relative path to {file_path}."
-                    return fixed_command, suggestion, variables
+                return fixed_command, suggestion, variables
         
         # Handle wrong IP addresses
         if re.search(r'(host|server|address).*?not found', stderr.lower()) or "could not resolve" in stderr.lower():
@@ -734,7 +734,7 @@ class PAW:
                 user_ip = variables.get('local_ip', self.get_local_ip())
                 if user_ip and old_ip[0] != user_ip:
                     fixed_command = command.replace(old_ip[0], user_ip)
-                    variables['target_ip'] = user_ip
+            variables['target_ip'] = user_ip
         
         # Handle sudo password or permissions errors
         if "sudo: 3 incorrect password attempts" in stderr or "sudo: incorrect password" in stderr:
@@ -1903,7 +1903,7 @@ Please ensure the commands are accurate and follow Kali Linux best practices.
                 commands = data["commands"]
                 if "explanations" in data:
                     explanations = data["explanations"]
-                else:
+                                    else:
                     explanations = [""] * len(commands)
                 return commands, explanations
         except Exception:
@@ -1939,7 +1939,7 @@ Please ensure the commands are accurate and follow Kali Linux best practices.
                     else:
                         commands.append(line)
                         explanations.append("")
-        except Exception as e:
+            except Exception as e:
             pass
             
         # If all extraction methods fail, return the response as a single command
@@ -2124,7 +2124,6 @@ John the Ripper is automatically installed on Kali Linux. These commands will wo
 
     def handle_mac_address_change_request(self, request):
         """Handle requests to change MAC address.
-        
         Args:
             request (str): The user's request
             
@@ -2292,7 +2291,6 @@ John the Ripper is automatically installed on Kali Linux. These commands will wo
             str: Formatted response with commands and explanations
         """
         response = "## Recommended Commands\n\n"
-        
         for i, (cmd, exp) in enumerate(zip(commands, explanations)):
             response += f"{i+1}. {exp}:\n   ```\n   {cmd}\n   ```\n\n"
             
@@ -2314,49 +2312,49 @@ John the Ripper is automatically installed on Kali Linux. These commands will wo
                 print("Updating Kali tools database from kali.org...")
             
             # Fetch the tools list from kali.org
-            response = requests.get("https://www.kali.org/tools/all-tools/")
-            if response.status_code != 200:
-                logger.error(f"Failed to fetch tools list: {response.status_code}")
-                return False
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            tools = []
-            categories = set()
-            
-            # Extract categories and tools
-            for heading in soup.find_all(['h3']):
-                category = heading.get_text().strip()
-                if not category or category in ('0', '7', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'):
-                    continue
-                    
-                categories.add(category)
+            try:
+                response = requests.get("https://www.kali.org/tools/all-tools/")
+                if response.status_code != 200:
+                    logger.error(f"Failed to fetch tools list: {response.status_code}")
+                    return False
                 
-                # Find the tool list after this category heading
-                tool_list = heading.find_next('ul')
-                if not tool_list:
-                    continue
-                    
-                for tool_item in tool_list.find_all('li'):
-                    tool_name = tool_item.get_text().strip()
-                    if tool_name and not tool_name.startswith('$') and not tool_name.startswith('*'):
-                        tools.append({
-                            "name": tool_name,
-                            "category": category,
-                            "description": f"Tool from Kali Linux in category: {category}",
-                            "common_usage": f"{tool_name} [options]",
-                            "examples": [
-                                {"description": "Basic usage", "command": tool_name}
-                            ]
-                        })
-            
-            if tools:
-                if RICH_AVAILABLE:
-                    console.print(f"[bold green]Found {len(tools)} tools in {len(categories)} categories[/]")
-                else:
-                    print(f"Found {len(tools)} tools in {len(categories)} categories")
+                soup = BeautifulSoup(response.text, 'html.parser')
+                tools = []
+                categories = set()
                 
-                # Update the local database
-                if extensive_kali_tools:
+                # Extract categories and tools
+                for heading in soup.find_all(['h3']):
+                    category = heading.get_text().strip()
+                    if not category or category in ('0', '7', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'):
+                        continue
+                        
+                    categories.add(category)
+                    
+                    # Find the tool list after this category heading
+                    tool_list = heading.find_next('ul')
+                    if not tool_list:
+                        continue
+                        
+                    for tool_item in tool_list.find_all('li'):
+                        tool_name = tool_item.get_text().strip()
+                        if tool_name and not tool_name.startswith('$') and not tool_name.startswith('*'):
+                            tools.append({
+                                "name": tool_name,
+                                "category": category,
+                                "description": f"Tool from Kali Linux in category: {category}",
+                                "common_usage": f"{tool_name} [options]",
+                                "examples": [
+                                    {"description": "Basic usage", "command": tool_name}
+                                ]
+                            })
+                
+                if tools:
+                    if RICH_AVAILABLE:
+                        console.print(f"[bold green]Found {len(tools)} tools in {len(categories)} categories[/]")
+                    else:
+                        print(f"Found {len(tools)} tools in {len(categories)} categories")
+                    
+                    # Update the local database
                     try:
                         import extensive_kali_tools
                         extensive_kali_tools.KALI_TOOLS = tools
@@ -2375,12 +2373,11 @@ John the Ripper is automatically installed on Kali Linux. These commands will wo
                         logger.error(f"Failed to update local database: {e}")
                         return False
                 else:
-                    logger.error("extensive_kali_tools module not available")
+                    logger.error("No tools found")
                     return False
-            else:
-                logger.error("No tools found")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"HTTP request failed: {e}")
                 return False
-                
         except ImportError:
             logger.error("Required packages not installed: requests, beautifulsoup4")
             if RICH_AVAILABLE:
