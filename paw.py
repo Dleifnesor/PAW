@@ -1903,7 +1903,7 @@ Please ensure the commands are accurate and follow Kali Linux best practices.
                 commands = data["commands"]
                 if "explanations" in data:
                     explanations = data["explanations"]
-                                    else:
+                else:
                     explanations = [""] * len(commands)
                 return commands, explanations
         except Exception:
@@ -1929,29 +1929,16 @@ Please ensure the commands are accurate and follow Kali Linux best practices.
             lines = response.split('\n')
             for line in lines:
                 line = line.strip()
-                if line and not line.startswith(("```", "#", "-", "*", ">")):
-                    if ":" in line:
-                        parts = line.split(":", 1)
-                        command = parts[1].strip()
-                        explanation = parts[0].strip()
-                        commands.append(command)
-                        explanations.append(explanation)
-                    else:
-                        commands.append(line)
-                        explanations.append("")
-            except Exception as e:
+                if line.startswith(('$ ', '# ')):
+                    line = line[2:].strip()
+                if line and not line.startswith('#'):
+                    commands.append(line)
+                    explanations.append("")
+            return commands, explanations
+        except Exception:
             pass
             
-        # If all extraction methods fail, return the response as a single command
-        if not commands:
-            if isinstance(response, str):
-                commands = [response.split('\n')[0]]
-            else:
-                commands = [str(response)]
-            explanations = ["Extracted command"]
-        
-        return commands, explanations
-    
+        return [], []
     def process_request(self, request, session_context=None):
         """Process a user request and generate a response."""
         # Extract command placeholders from request
