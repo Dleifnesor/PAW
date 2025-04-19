@@ -17,6 +17,8 @@ import re
 import socket
 from typing import List, Dict
 import platform
+import requests
+from bs4 import BeautifulSoup
 
 # Get the absolute path of the current script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -126,8 +128,8 @@ use_sudo = false
             config.read(CONFIG_PATH)
         except Exception as e:
             logger.error(f"Failed to create default config: {e}")
-            logger.error(f"Configuration file not found: {CONFIG_PATH}")
-            sys.exit(1)
+        logger.error(f"Configuration file not found: {CONFIG_PATH}")
+        sys.exit(1)
 
 MODEL = config['DEFAULT'].get('model', 'qwen2.5-coder:7b')
 OLLAMA_HOST = config['DEFAULT'].get('ollama_host', 'http://localhost:11434')
@@ -253,7 +255,7 @@ class PAW:
                 print(f"Warning: Could not initialize Kali tools: {e}")
                 self.kali_tools = None
                 self.kali_categories = None
-
+    
     def init_kali_tools(self):
         """Initialize the Kali tools database for use in command generation."""
         if extensive_kali_tools:
@@ -689,103 +691,50 @@ class PAW:
         return command
     
     def fix_failed_command(self, command, stderr, variables):
-        """Attempt to fix a failed command based on error message."""
+        """Try to fix a failed command based on the error message."""
         fixed_command = command
         suggestion = None
-        ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
         
-        # Handle missing interface error
-        if "cannot open interface" in stderr or "No such device" in stderr:
-            # This is likely an issue with a network interface placeholder
-            interfaces = self.get_network_interfaces()
-            suggestion = f"Available network interfaces: {', '.join(interfaces)}"
-            
-            if interfaces:
-                # Try to replace the interface in the command
-                for placeholder in ["<interface>", "eth0", "wlan0"]:
-                    if placeholder in command:
-                        fixed_command = command.replace(placeholder, interfaces[0])
-                        variables['interface'] = interfaces[0]
-                        return fixed_command, suggestion, variables
-                
-                # If no placeholder was found but we have interfaces, prompt the user
-                if RICH_AVAILABLE:
-                    selected_interface = Prompt.ask(
-                        "[bold yellow]Enter interface name[/]", 
-                        choices=interfaces, 
-                        default=interfaces[0]
-                    )
-                else:
-                    print(f"\033[1;33m[*] Available interfaces: {', '.join(interfaces)}\033[0m")
-                    selected_interface = input(f"Enter interface name [{interfaces[0]}]: ").strip()
-                    if not selected_interface:
-                        selected_interface = interfaces[0]
-                
-                variables['interface'] = selected_interface
-                
-                # Try to find the interface name in the command
-                interface_pattern = r'\b([a-zA-Z0-9]+)\b'
-                # Replace the first occurrence of what looks like an interface name
-                interface_match = re.search(interface_pattern, command)
-                if interface_match:
-                    fixed_command = command.replace(interface_match.group(0), selected_interface)
+        # If no command or stderr, can't fix it
+        if not command or not stderr:
+            return command, None, variables
+        
+        # Handle SSH connection issues
+        if "ssh" in command and ("connection refused" in stderr.lower() or "could not resolve" in stderr.lower()):
+            # SSH connection failed
+            if "-p" not in command and "scp" not in command:
+                fixed_command = command.replace("ssh ", "ssh -p 22 ")
+                suggestion = "Using default SSH port 22 explicitly."
                 return fixed_command, suggestion, variables
         
-        # Common error patterns and fixes
-        if "No such file" in stderr or "not found" in stderr:
-            # Check for unresolved variables
-            placeholders = re.findall(r'<(\w+)>', command)
-            if placeholders:
-                suggestion = f"Command failed because it contains unresolved placeholders: {', '.join(placeholders)}"
-                # Try to substitute with any variables we have
-                for placeholder in placeholders:
-                    if placeholder in variables:
-                        fixed_command = fixed_command.replace(f"<{placeholder}>", str(variables[placeholder]))
-                    elif placeholder == "your_ip" or placeholder == "local_ip":
-                        # Get local IP address
-                        local_ip = self.get_local_ip()
-                        variables[placeholder] = local_ip
-                        fixed_command = fixed_command.replace(f"<{placeholder}>", local_ip)
-                    else:
-                        # Ask user for input for this variable
-                        if RICH_AVAILABLE:
-                            user_value = Prompt.ask(f"[bold yellow]Enter value for[/] [bold cyan]<{placeholder}>[/]")
-                        else:
-                            user_value = input(f"Enter value for <{placeholder}>: ")
-                        variables[placeholder] = user_value
-                        fixed_command = fixed_command.replace(f"<{placeholder}>", user_value)
+        # Handle file not found issues
+        if "no such file" in stderr.lower() or "cannot access" in stderr.lower() or "not found" in stderr.lower():
+            # File might not exist
+            match = re.search(r'[\'"]?([/\w\.-]+)[\'"]?: No such file', stderr)
+            if match:
+                file_path = match.group(1)
+                if file_path.startswith("/"):
+                    # Try replacing absolute path with relative
+                    rel_path = file_path.split("/")[-1]
+                    fixed_command = command.replace(file_path, rel_path)
+                    suggestion = f"File {file_path} not found, trying with relative path."
+                    return fixed_command, suggestion, variables
+                elif not file_path.startswith("./") and not file_path.startswith("../"):
+                    # Try with explicit relative path
+                    fixed_command = command.replace(file_path, "./" + file_path)
+                    suggestion = f"Adding explicit relative path to {file_path}."
+                    return fixed_command, suggestion, variables
         
-        elif "Failed to resolve" in stderr:
-            # Target resolution issue
-            if RICH_AVAILABLE:
-                user_ip = Prompt.ask("[bold yellow]Enter a valid IP address or hostname to scan[/]")
-            else:
-                user_ip = input("Enter a valid IP address or hostname to scan: ")
-            variables['target_ip'] = user_ip
-            fixed_command = command.replace("<target_ip>", user_ip).replace("<target_ip_range>", user_ip)
-            if "/24" not in fixed_command and "scan" in fixed_command:
-                fixed_command = fixed_command.replace(user_ip, f"{user_ip}/24")
-                variables['target_ip_range'] = f"{user_ip}/24"
-        
-        elif "host seems down" in stderr.lower() or "no route to host" in stderr.lower():
-            # Host is down or unreachable - add -Pn to nmap or try different approach
-            if "nmap" in command and "-Pn" not in command:
-                fixed_command = command.replace("nmap ", "nmap -Pn ")
-                suggestion = "Host appears to be down or blocking ping. Adding -Pn to bypass ping discovery."
-            else:
-                # For non-nmap commands, inform user the host is unreachable
-                suggestion = "The target host appears to be unreachable. Check connectivity or try a different target."
-                if RICH_AVAILABLE:
-                    user_ip = Prompt.ask("[bold yellow]Enter an alternative target IP address[/]", default=re.findall(ip_pattern, command)[0] if re.findall(ip_pattern, command) else "")
-                else:
-                    user_ip = input("Enter an alternative target IP address: ")
-                
-                if user_ip:
-                    # Replace IP in command
-                    old_ip = re.findall(ip_pattern, command)
-                    if old_ip:
-                        fixed_command = command.replace(old_ip[0], user_ip)
-                        variables['target_ip'] = user_ip
+        # Handle wrong IP addresses
+        if re.search(r'(host|server|address).*?not found', stderr.lower()) or "could not resolve" in stderr.lower():
+            # Try to extract IP addresses from the command and check if they seem incorrect
+            old_ip = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', command)
+            if old_ip:
+                # If command contains an IP, try with a local IP
+                user_ip = variables.get('local_ip', self.get_local_ip())
+                if user_ip and old_ip[0] != user_ip:
+                    fixed_command = command.replace(old_ip[0], user_ip)
+                    variables['target_ip'] = user_ip
         
         # Handle sudo password or permissions errors
         if "sudo: 3 incorrect password attempts" in stderr or "sudo: incorrect password" in stderr:
@@ -822,71 +771,62 @@ class PAW:
                 elif "device or resource busy" in stderr.lower():
                     suggestion += " The resource might be in use by another process."
                 
-                fixed_command = command  # Keep command unchanged if sudo is disabled
-        
-        elif "Syntax error" in stderr:
-            # Syntax error - try to fix basic issues
-            for placeholder in re.findall(r'<(\w+)>', command):
-                if placeholder == "your_ip" or placeholder == "local_ip":
-                    # Get local IP address
-                    local_ip = self.get_local_ip()
-                    variables[placeholder] = local_ip
-                    fixed_command = fixed_command.replace(f"<{placeholder}>", local_ip)
-                else:
-                    if RICH_AVAILABLE:
-                        user_value = Prompt.ask(f"[bold yellow]Enter value for[/] [bold cyan]<{placeholder}>[/]")
-                    else:
-                        user_value = input(f"Enter value for <{placeholder}>: ")
-                    variables[placeholder] = user_value
-                    fixed_command = fixed_command.replace(f"<{placeholder}>", user_value)
+                fixed_command = command  # Keep the original command
         
         return fixed_command, suggestion, variables
-    
+        
     def execute_command(self, command, shell=True):
-        """Execute a shell command and return the output.
+        """Execute a shell command and return stdout, stderr, and return code.
         
         Args:
-            command (str): The command to execute
-            shell (bool): Whether to execute the command through the shell
+            command: The command to execute
+            shell: Whether to use shell=True when executing
             
         Returns:
-            tuple: (stdout, stderr, exit_code)
+            tuple: (stdout, stderr, return_code)
         """
         if not command:
-            return "", "", 0
-            
-        # Handle sudo requirements but preserve explicit sudo if user already included it
-        if not command.startswith("sudo "):
-            command = self.handle_sudo(command)
+            return "", "No command provided", 1
         
-        # For sudo commands, run them interactively to allow password entry
-        if command.startswith("sudo "):
-            try:
-                # Use a separate process to allow interactive password prompts
-                print(f"\nExecuting: {command}")
-                process = subprocess.run(
-                    command,
-                    shell=shell,
-                    text=True,
-                    capture_output=False  # Don't capture output to allow terminal interaction
-                )
-                return "", "", process.returncode
-            except Exception as e:
-                return "", str(e), 1
-        else:
-            # For non-sudo commands, capture output as before
-            try:
-                process = subprocess.Popen(
-                    command,
-                    shell=shell,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-                stdout, stderr = process.communicate()
-                return stdout, stderr, process.returncode
-            except Exception as e:
-                return "", str(e), 1
+        # Apply command fixes through the handle_sudo method
+        command = self.handle_sudo(command)
+        
+        # Log the command
+        logger.info(f"Executing command: {command}")
+        
+        try:
+            # Check if command requires terminal interaction (sudo)
+            if "sudo" in command and self.use_sudo:
+                # For sudo commands, we need to allow terminal interaction for password
+                try:
+                    process = subprocess.Popen(
+                        command,
+                        shell=shell,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        stdin=None,  # Use None to allow terminal interaction
+                        text=True
+                    )
+                    stdout, stderr = process.communicate()
+                    return stdout, stderr, process.returncode
+                except Exception as e:
+                    return "", str(e), 1
+            else:
+                # For non-sudo commands, capture output as before
+                try:
+                    process = subprocess.Popen(
+                        command,
+                        shell=shell,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    stdout, stderr = process.communicate()
+                    return stdout, stderr, process.returncode
+                except Exception as e:
+                    return "", str(e), 1
+        except Exception as e:
+            return "", str(e), 1
     
     def display_plan(self, plan):
         """Display the action plan with fancy formatting."""
@@ -963,24 +903,36 @@ class PAW:
             return run_cmd == "" or run_cmd == "y"
     
     def extract_file_paths(self, text):
-        """Extract potential file paths from text, handling paths with spaces and quotes."""
-        # Try to match quoted paths first (handles spaces in paths)
-        quoted_paths = re.findall(r'["\']((?:/|\.)[^"\']+)["\']', text)
-        if quoted_paths:
-            return quoted_paths
+        """Extract file paths from text.
+        
+        Args:
+            text (str): The text to extract file paths from
             
-        # Try to match unquoted paths
-        unquoted_paths = re.findall(r'(?<=\s|^)((?:/|\.)[^\s]+)(?=\s|$)', text)
+        Returns:
+            list: List of extracted file paths
+        """
+        file_paths = []
         
-        # For paths that might contain spaces
-        space_paths = []
-        if "New Folder" in text or "new folder" in text:
-            # Try to reconstruct paths with spaces
-            potential_paths = re.findall(r'(?:/[^\s/]+)+(?:\s+[^\s/]+)+\.[a-zA-Z0-9]+', text, re.IGNORECASE)
-            if potential_paths:
-                space_paths.extend(potential_paths)
+        # Match common file path patterns
+        # Fixed-width look-behind pattern to avoid the variable width error
+        path_patterns = [
+            r'/(?:[a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+',  # Unix absolute paths
+            r'~(?:[a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+',  # Unix home paths
+            r'[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+',  # Simple filenames
+            r'[a-zA-Z]:\\(?:[a-zA-Z0-9_-]+\\)*[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+',  # Windows paths
+            r'[a-zA-Z0-9_-/]+\.(?:txt|log|conf|py|sh|c|cpp|h|java|js|html|css|php|xml|json|yaml|yml)'  # Files with common extensions
+        ]
         
-        return quoted_paths + unquoted_paths + space_paths
+        # Apply each pattern
+        for pattern in path_patterns:
+            matches = re.findall(pattern, text)
+            file_paths.extend(matches)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        file_paths = [p for p in file_paths if not (p in seen or seen.add(p))]
+        
+        return file_paths
 
     def suggest_alternative_command(self, failed_cmd, stderr, variables):
         """Suggest a completely different approach based on the failed command and error output."""
@@ -1172,7 +1124,7 @@ Make sure the alternative is genuinely different and appropriate for the task at
                         result = self.execute_command(show_cmd, updated_vars)
                         self.display_result(result, command_index, total_commands)
                     
-                    return result, updated_vars
+                        return result, updated_vars
 
         # Special handling for file not found errors
         if "No such file" in result["stderr"] or "not found" in result["stderr"]:
@@ -1954,7 +1906,7 @@ Please ensure the commands are accurate and follow Kali Linux best practices.
                 else:
                     explanations = [""] * len(commands)
                 return commands, explanations
-        except:
+        except Exception:
             pass
             
         try:
@@ -1969,7 +1921,7 @@ Please ensure the commands are accurate and follow Kali Linux best practices.
                         commands.extend(lines)
                         explanations.extend([""] * len(lines))
                 return commands, explanations
-        except:
+        except Exception:
             pass
             
         try:
@@ -2051,7 +2003,7 @@ Please ensure the commands are accurate and follow Kali Linux best practices.
             if kali_recs:
                 response += "\n\nRecommended Kali Tools:\n" + "\n".join(kali_recs)
         
-        return response
+            return response
         
     def handle_gpg_crack_request(self, request):
         """Handle requests to crack GPG file passwords.
@@ -2343,8 +2295,102 @@ John the Ripper is automatically installed on Kali Linux. These commands will wo
         
         for i, (cmd, exp) in enumerate(zip(commands, explanations)):
             response += f"{i+1}. {exp}:\n   ```\n   {cmd}\n   ```\n\n"
+            
+            return response
+
+    def update_kali_tools_database(self):
+        """Update the Kali tools database from kali.org.
         
-        return response
+        This function scrapes the Kali Linux tools list from kali.org and
+        updates the local database with the latest tools and categories.
+        
+        Returns:
+            bool: True if update successful, False otherwise
+        """
+        try:
+            if RICH_AVAILABLE:
+                console.print("[bold yellow]Updating Kali tools database from kali.org...[/]")
+            else:
+                print("Updating Kali tools database from kali.org...")
+            
+            # Fetch the tools list from kali.org
+            response = requests.get("https://www.kali.org/tools/all-tools/")
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch tools list: {response.status_code}")
+                return False
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            tools = []
+            categories = set()
+            
+            # Extract categories and tools
+            for heading in soup.find_all(['h3']):
+                category = heading.get_text().strip()
+                if not category or category in ('0', '7', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'):
+                    continue
+                    
+                categories.add(category)
+                
+                # Find the tool list after this category heading
+                tool_list = heading.find_next('ul')
+                if not tool_list:
+                    continue
+                    
+                for tool_item in tool_list.find_all('li'):
+                    tool_name = tool_item.get_text().strip()
+                    if tool_name and not tool_name.startswith('$') and not tool_name.startswith('*'):
+                        tools.append({
+                            "name": tool_name,
+                            "category": category,
+                            "description": f"Tool from Kali Linux in category: {category}",
+                            "common_usage": f"{tool_name} [options]",
+                            "examples": [
+                                {"description": "Basic usage", "command": tool_name}
+                            ]
+                        })
+            
+            if tools:
+                if RICH_AVAILABLE:
+                    console.print(f"[bold green]Found {len(tools)} tools in {len(categories)} categories[/]")
+                else:
+                    print(f"Found {len(tools)} tools in {len(categories)} categories")
+                
+                # Update the local database
+                if extensive_kali_tools:
+                    try:
+                        import extensive_kali_tools
+                        extensive_kali_tools.KALI_TOOLS = tools
+                        extensive_kali_tools.CATEGORIES = list(categories)
+                        
+                        # Update our local copy
+                        self.kali_tools = tools
+                        self.kali_categories = list(categories)
+                        
+                        if RICH_AVAILABLE:
+                            console.print("[bold green]Kali tools database updated successfully[/]")
+                        else:
+                            print("Kali tools database updated successfully")
+                        return True
+                    except Exception as e:
+                        logger.error(f"Failed to update local database: {e}")
+                        return False
+                else:
+                    logger.error("extensive_kali_tools module not available")
+                    return False
+            else:
+                logger.error("No tools found")
+                return False
+                
+        except ImportError:
+            logger.error("Required packages not installed: requests, beautifulsoup4")
+            if RICH_AVAILABLE:
+                console.print("[bold red]Please install required packages:[/] [code]pip install requests beautifulsoup4[/code]")
+            else:
+                print("Please install required packages: pip install requests beautifulsoup4")
+            return False
+        except Exception as e:
+            logger.error(f"Error updating Kali tools database: {e}")
+            return False
 
 def main():
     parser = argparse.ArgumentParser(description="PAW - Prompt Assisted Workflow for Kali Linux")
@@ -2352,6 +2398,7 @@ def main():
     parser.add_argument("--version", action="store_true", help="Show version")
     parser.add_argument("--timeout", type=float, help="Set LLM request timeout in seconds")
     parser.add_argument("--theme", choices=list(THEMES.keys()), help="Set UI theme")
+    parser.add_argument("--update-tools", action="store_true", help="Update Kali tools database from kali.org")
     
     # Create a mutually exclusive group for progressive mode options
     mode_group = parser.add_mutually_exclusive_group()
@@ -2362,37 +2409,54 @@ def main():
     
     if args.version:
         if RICH_AVAILABLE:
-            console.print("[bold cyan]PAW - Prompt Assisted Workflow v1.0[/]")
+            console.print(f"[bold]PAW[/] version [bold green]{VERSION}[/]")
         else:
-            print("PAW - Prompt Assisted Workflow v1.0")
-        sys.exit(0)
+            print(f"PAW version {VERSION}")
+        return
     
-    # Override timeout if specified
-    global LLM_TIMEOUT
+    # Initialize PAW
+    paw = PAW()
+    
+    # Handle tool database update
+    if args.update_tools:
+        if paw.update_kali_tools_database():
+            print("Kali tools database updated successfully.")
+        else:
+            print("Failed to update Kali tools database.")
+        return
+    
+    # Set timeout if provided
     if args.timeout:
+        global LLM_TIMEOUT
         LLM_TIMEOUT = args.timeout
         if RICH_AVAILABLE:
-            console.print(f"[bold blue]LLM timeout set to {LLM_TIMEOUT} seconds[/]")
+            console.print(f"[bold]LLM timeout set to[/] [bold green]{LLM_TIMEOUT}[/] seconds.")
         else:
-            print(f"\033[1;34m[*] LLM timeout set to {LLM_TIMEOUT} seconds\033[0m")
+            print(f"LLM timeout set to {LLM_TIMEOUT} seconds.")
     
-    # Override theme if specified
-    global THEME
-    if args.theme and args.theme in THEMES:
-        THEME = args.theme
+    # Set theme if provided
+    if args.theme:
+        paw.theme = THEMES[args.theme]
+        if RICH_AVAILABLE:
+            console.print(f"[bold]Theme set to[/] [bold green]{args.theme}[/]")
+        else:
+            print(f"Theme set to {args.theme}")
     
-    # Display ASCII art
-    if ascii_art:
-        ascii_art.display_ascii_art()
+    # Set progressive mode if requested
+    if args.adaptive or args.prog:
+        paw.adaptive_mode = True
+        if RICH_AVAILABLE:
+            console.print("[bold]Adaptive mode [bold green]enabled[/]")
+        else:
+            print("Adaptive mode enabled")
     
-    # Show fancy header if rich is available
+    # Show fancy header
     if RICH_AVAILABLE:
-        show_fancy_header(
-            "Prompt Assisted Workflow", 
-            "Your AI-powered Kali Linux assistant"
-        )
-    
-    paw = PAW()
+        show_fancy_header("Prompt Assisted Workflow", f"v{VERSION} for Kali Linux")
+    else:
+        print("\n" + "=" * 60)
+        print(f"  Prompt Assisted Workflow v{VERSION} for Kali Linux")
+        print("=" * 60 + "\n")
     
     if args.request:
         # Process the request with adaptive mode if specified
