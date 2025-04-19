@@ -3,13 +3,11 @@
 import os
 import sys
 import json
-import time
-import shlex
-import logging
-import argparse
-import configparser
 import subprocess
-from pathlib import Path
+import logging
+import uuid
+import time
+import re
 from datetime import datetime
 import httpx
 import importlib.util
@@ -19,6 +17,12 @@ from typing import List, Dict, Optional
 import platform
 import requests
 from bs4 import BeautifulSoup
+
+# Import extensive_kali_tools
+try:
+    import extensive_kali_tools
+except ImportError:
+    print("Warning: Could not import extensive_kali_tools module.")
 
 # Version information
 VERSION = "1.0.0"
@@ -63,12 +67,6 @@ except ImportError:
     except ImportError:
         print("Warning: Could not import ascii_art module. Some features may be limited.")
         ascii_art = None
-
-try:
-    import extensive_kali_tools
-except ImportError:
-    print("Warning: Could not import extensive_kali_tools module. Kali tools functionality will be limited.")
-    extensive_kali_tools = None
 
 # Add rich library for fancy UI
 try:
@@ -131,8 +129,8 @@ use_sudo = false
             config.read(CONFIG_PATH)
         except Exception as e:
             logger.error(f"Failed to create default config: {e}")
-            logger.error(f"Configuration file not found: {CONFIG_PATH}")
-            sys.exit(1)
+        logger.error(f"Configuration file not found: {CONFIG_PATH}")
+        sys.exit(1)
 
 # Expand user directory in paths
 LOG_DIRECTORY = os.path.expanduser(config['DEFAULT'].get('log_directory', '~/.local/share/paw/logs'))
@@ -754,7 +752,7 @@ class PAW:
         
         # Log the command
         logger.info(f"Executing command: {command}")
-        
+            
         try:
             # Check if command requires terminal interaction (sudo)
             if "sudo" in command and self.use_sudo:
@@ -2241,8 +2239,8 @@ John the Ripper is automatically installed on Kali Linux. These commands will wo
         response = "## Recommended Commands\n\n"
         for i, (cmd, exp) in enumerate(zip(commands, explanations)):
             response += f"{i+1}. {exp}:\n   ```\n   {cmd}\n   ```\n\n"
-            
-            return response
+        
+        return response
 
     def update_kali_tools_database(self):
         """Update the Kali tools database from kali.org.
