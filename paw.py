@@ -100,38 +100,38 @@ logger = logging.getLogger('PAW')
 CONFIG_PATH = os.environ.get("PAW_CONFIG", os.path.join(os.path.expanduser("~"), ".config", "paw", "config.ini"))
 config = configparser.ConfigParser()
 
-# Check if the specified config file exists
-if os.path.exists(CONFIG_PATH):
-    config.read(CONFIG_PATH)
-else:
-    # Try a local config file in the current directory if the environment variable isn't set
-    # or the specified file doesn't exist
-    if not os.environ.get("PAW_CONFIG") and os.path.exists("./paw-local-config.ini"):
-        CONFIG_PATH = "./paw-local-config.ini"
-        config.read(CONFIG_PATH)
-    else:
-        # Create default config
-        try:
-            os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-            with open(CONFIG_PATH, 'w') as f:
-                f.write("""[DEFAULT]
-model = qwen2.5-coder:7b
-ollama_host = http://localhost:11434
-explain_commands = true
-log_commands = true
-log_directory = ~/.local/share/paw/logs
-llm_timeout = 600.0
-command_timeout = 600.0
-theme = cyberpunk
-adaptive_mode = false
-use_sudo = false
-""")
-            print(f"Created default config at {CONFIG_PATH}")
-            config.read(CONFIG_PATH)
-        except Exception as e:
-            logger.error(f"Failed to create default config: {e}")
-        logger.error(f"Configuration file not found: {CONFIG_PATH}")
+# Create config directory if it doesn't exist
+config_dir = os.path.dirname(CONFIG_PATH)
+os.makedirs(config_dir, exist_ok=True)
+
+# Create default config if it doesn't exist
+if not os.path.exists(CONFIG_PATH):
+    try:
+        config['DEFAULT'] = {
+            'model': 'qwen2.5-coder:7b',
+            'ollama_host': 'http://localhost:11434',
+            'explain_commands': 'true',
+            'log_commands': 'true',
+            'log_directory': '~/.local/share/paw/logs',
+            'llm_timeout': '600.0',
+            'command_timeout': '600.0',
+            'theme': 'cyberpunk',
+            'adaptive_mode': 'false',
+            'use_sudo': 'false'
+        }
+        with open(CONFIG_PATH, 'w') as f:
+            config.write(f)
+        print(f"Created default config at {CONFIG_PATH}")
+    except Exception as e:
+        logger.error(f"Failed to create default config: {e}")
         sys.exit(1)
+
+# Read the config file
+try:
+    config.read(CONFIG_PATH)
+except Exception as e:
+    logger.error(f"Failed to read config file: {e}")
+    sys.exit(1)
 
 # Expand user directory in paths
 LOG_DIRECTORY = os.path.expanduser(config['DEFAULT'].get('log_directory', '~/.local/share/paw/logs'))
