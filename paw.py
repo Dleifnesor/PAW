@@ -17,6 +17,7 @@ from typing import List, Dict, Optional
 import platform
 import requests
 from bs4 import BeautifulSoup
+import configparser
 
 # Import extensive_kali_tools
 try:
