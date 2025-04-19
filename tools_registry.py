@@ -291,17 +291,17 @@ def register_tool(tool):
         return False
     
     try:
-        # Create directory if it doesn't exist
-        custom_registry_dir = "/usr/local/share/paw/tools"
-        custom_registry_path = os.path.join(custom_registry_dir, "custom_registry.json")
-        
-        os.makedirs(custom_registry_dir, exist_ok=True)
-        
-        # Load existing registry or create a new one
-        if os.path.exists(custom_registry_path):
-            try:
-                with open(custom_registry_path, 'r') as f:
-                    custom_registry = json.load(f)
+    # Create directory if it doesn't exist
+    custom_registry_dir = "/usr/local/share/paw/tools"
+    custom_registry_path = os.path.join(custom_registry_dir, "custom_registry.json")
+    
+    os.makedirs(custom_registry_dir, exist_ok=True)
+    
+    # Load existing registry or create a new one
+    if os.path.exists(custom_registry_path):
+        try:
+            with open(custom_registry_path, 'r') as f:
+                custom_registry = json.load(f)
                     
                     # Convert to list if it's a dictionary
                     if isinstance(custom_registry, dict):
@@ -317,7 +317,7 @@ def register_tool(tool):
             except Exception as e:
                 print(f"Warning: Could not load custom registry: {e}")
                 registry_list = []
-        else:
+    else:
             registry_list = []
         
         # Check if tool already exists
@@ -332,12 +332,12 @@ def register_tool(tool):
         # Add new tool if it doesn't exist
         if not tool_exists:
             registry_list.append(tool)
-        
-        # Save the updated registry
-        with open(custom_registry_path, 'w') as f:
+    
+    # Save the updated registry
+    with open(custom_registry_path, 'w') as f:
             json.dump(registry_list, f, indent=4)
-        
-        return True
+    
+    return True
     except Exception as e:
         print(f"Error registering tool: {e}")
         return False
@@ -371,10 +371,10 @@ def check_tool_availability():
     
     for tool in tools:
         if isinstance(tool, dict) and "name" in tool:
-            # Check if the tool is in the PATH
+        # Check if the tool is in the PATH
             tool_name = tool["name"]
-            tool_path = shutil.which(tool_name)
-            availability[tool_name] = bool(tool_path)
+        tool_path = shutil.which(tool_name)
+        availability[tool_name] = bool(tool_path)
     
     return availability
 

@@ -15,7 +15,7 @@ import httpx
 import importlib.util
 import re
 import socket
-from typing import List, Dict
+from typing import List, Dict, Optional
 import platform
 import requests
 from bs4 import BeautifulSoup
@@ -98,7 +98,7 @@ logger = logging.getLogger('PAW')
 
 # Configuration
 # Check for environment variable for config path first, otherwise use default
-CONFIG_PATH = os.environ.get("PAW_CONFIG", "/etc/paw/config.ini")
+CONFIG_PATH = os.environ.get("PAW_CONFIG", os.path.join(os.path.expanduser("~"), ".config", "paw", "config.ini"))
 config = configparser.ConfigParser()
 
 # Check if the specified config file exists
@@ -120,7 +120,7 @@ model = qwen2.5-coder:7b
 ollama_host = http://localhost:11434
 explain_commands = true
 log_commands = true
-log_directory = /var/log/paw
+log_directory = ~/.local/share/paw/logs
 llm_timeout = 600.0
 command_timeout = 600.0
 theme = cyberpunk
@@ -131,21 +131,22 @@ use_sudo = false
             config.read(CONFIG_PATH)
         except Exception as e:
             logger.error(f"Failed to create default config: {e}")
-        logger.error(f"Configuration file not found: {CONFIG_PATH}")
-        sys.exit(1)
+            logger.error(f"Configuration file not found: {CONFIG_PATH}")
+            sys.exit(1)
 
+# Expand user directory in paths
+LOG_DIRECTORY = os.path.expanduser(config['DEFAULT'].get('log_directory', '~/.local/share/paw/logs'))
+
+# Create log directory if it doesn't exist
+os.makedirs(LOG_DIRECTORY, exist_ok=True)
+
+# Rest of the configuration
 MODEL = config['DEFAULT'].get('model', 'qwen2.5-coder:7b')
 OLLAMA_HOST = config['DEFAULT'].get('ollama_host', 'http://localhost:11434')
 EXPLAIN_COMMANDS = config['DEFAULT'].getboolean('explain_commands', True)
 LOG_COMMANDS = config['DEFAULT'].getboolean('log_commands', True)
-LOG_DIRECTORY = config['DEFAULT'].get('log_directory', '/var/log/paw')
-# Configurable timeout (default: 600 seconds)
 LLM_TIMEOUT = float(config['DEFAULT'].get('llm_timeout', '600.0'))
-# Theme configuration
 THEME = config['DEFAULT'].get('theme', 'cyberpunk').lower()
-
-# Create log directory if it doesn't exist
-os.makedirs(LOG_DIRECTORY, exist_ok=True)
 
 # Theme colors
 THEMES = {
@@ -694,90 +695,47 @@ class PAW:
         return command
     
     def fix_failed_command(self, command, stderr, variables):
-        """Try to fix a failed command based on the error message."""
-        fixed_command = command
-        suggestion = None
-        
-        # If no command or stderr, can't fix it
-        if not command or not stderr:
-            return command, None, variables
-        
+        """Attempt to fix a failed command based on error message"""
+        if not stderr:
+            return command
+
         # Handle SSH connection issues
-        if "ssh" in command and ("connection refused" in stderr.lower() or "could not resolve" in stderr.lower()):
-            # SSH connection failed
-            if "-p" not in command and "scp" not in command:
-                fixed_command = command.replace("ssh ", "ssh -p 22 ")
-                suggestion = "Using default SSH port 22 explicitly."
-                return fixed_command, suggestion, variables
-        
-        # Handle file not found issues
-        if "no such file" in stderr.lower() or "cannot access" in stderr.lower() or "not found" in stderr.lower():
-            # File might not exist
-            match = re.search(r'[\'"]?([/\w\.-]+)[\'"]?: No such file', stderr)
-            if match:
-                file_path = match.group(1)
-                if file_path.startswith("/"):
-                    # Try replacing absolute path with relative
-                    rel_path = file_path.split("/")[-1]
-                    fixed_command = command.replace(file_path, rel_path)
-                    suggestion = f"File {file_path} not found, trying with relative path."
-                    return fixed_command, suggestion, variables
-                elif not file_path.startswith("./") and not file_path.startswith("../"):
-                    # Try with explicit relative path
-                    fixed_command = command.replace(file_path, "./" + file_path)
-                    suggestion = f"Adding explicit relative path to {file_path}."
-                return fixed_command, suggestion, variables
-        
-        # Handle wrong IP addresses
-        if re.search(r'(host|server|address).*?not found', stderr.lower()) or "could not resolve" in stderr.lower():
-            # Try to extract IP addresses from the command and check if they seem incorrect
-            old_ip = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', command)
-            if old_ip:
-                # If command contains an IP, try with a local IP
-                user_ip = variables.get('local_ip', self.get_local_ip())
-                if user_ip and old_ip[0] != user_ip:
-                    fixed_command = command.replace(old_ip[0], user_ip)
-            variables['target_ip'] = user_ip
-        
-        # Handle sudo password or permissions errors
-        if "sudo: 3 incorrect password attempts" in stderr or "sudo: incorrect password" in stderr:
-            # This happens when password prompts occur and fail
-            if RICH_AVAILABLE:
-                console.print("[bold red]Sudo password authentication failed.[/]")
-                console.print("[bold yellow]Attempting to run the command without sudo.[/]")
-            else:
-                print("\033[1;31m[!] Sudo password authentication failed.\033[0m")
-                print("\033[1;33m[*] Attempting to run the command without sudo.\033[0m")
-            
-            # Remove sudo from the command
-            if command.strip().startswith("sudo "):
-                fixed_command = command.replace("sudo ", "", 1)
-                suggestion = "Running the command without sudo to avoid password prompts."
-                
-                # If this would set use_sudo to False globally
-                self.use_sudo = False
-                return fixed_command, suggestion, variables
-        
-        # Handle permission issues
-        elif "permission denied" in stderr.lower() or "privileges" in stderr.lower():
-            # Permission issue
+        if "Connection refused" in stderr or "Connection timed out" in stderr:
+            if "ssh" in command and "-p" not in command:
+                return command + " -p 22"  # Add default SSH port if not specified
+            return command
+
+        # Handle file not found errors
+        if "No such file or directory" in stderr:
+            # Try to replace absolute paths with relative paths
+            file_paths = self.extract_file_paths(stderr)
+            for path in file_paths:
+                if os.path.isabs(path):
+                    rel_path = os.path.relpath(path)
+                    command = command.replace(path, rel_path)
+            return command
+
+        # Handle incorrect IP addresses
+        if "Invalid IP address" in stderr or "Name or service not known" in stderr:
+            local_ip = self.get_local_ip()
+            if local_ip:
+                return command.replace("127.0.0.1", local_ip)
+            return command
+
+        # Handle sudo password failures
+        if "sudo: no password was provided" in stderr or "sudo: a password is required" in stderr:
             if self.use_sudo:
-                fixed_command = "sudo " + command if not command.startswith("sudo ") else command
-                suggestion = "This command requires elevated privileges. Added sudo."
-            else:
-                # If sudo is disabled, suggest running as user
-                suggestion = "Permission denied. This command might require elevated privileges, but sudo is disabled."
-                
-                # Suggest alternative approaches for common permission issues
-                if "cannot open" in stderr.lower() and ("/dev/" in command or "/proc/" in command or "/sys/" in command):
-                    suggestion += " Consider using alternative tools that don't require system access."
-                elif "device or resource busy" in stderr.lower():
-                    suggestion += " The resource might be in use by another process."
-                
-                fixed_command = command  # Keep the original command
-        
-        return fixed_command, suggestion, variables
-        
+                return command.replace("sudo ", "")
+            return command
+
+        # Handle permission issues
+        if "Permission denied" in stderr:
+            if not self.use_sudo and "sudo" not in command:
+                return "sudo " + command
+            return command
+
+        return command
+    
     def execute_command(self, command, shell=True):
         """Execute a shell command and return stdout, stderr, and return code.
         

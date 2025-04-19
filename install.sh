@@ -206,10 +206,10 @@ chmod -R 755 "$DOC_DIR"
 # Check if running on Kali Linux and set up Kali tools
 echo "Checking for Kali Linux..."
 if [ -f /etc/os-release ] && grep -q "Kali" /etc/os-release; then
-    echo "Kali Linux detected. Setting up Kali tools integration..."
-    
+  echo "Kali Linux detected. Setting up Kali tools integration..."
+  
     # Check for required tools
-    echo "Checking for required Kali tools..."
+  echo "Checking for required Kali tools..."
     MISSING_TOOLS=""
     for tool in nmap nikto metasploit-framework; do
         if ! command -v $tool &> /dev/null && ! dpkg -l | grep -q $tool; then
@@ -218,28 +218,28 @@ if [ -f /etc/os-release ] && grep -q "Kali" /etc/os-release; then
             else
                 MISSING_TOOLS="$tool"
             fi
-        fi
-    done
-    
+    fi
+  done
+  
     if [ -n "$MISSING_TOOLS" ]; then
         echo "Some recommended Kali tools are not installed: $MISSING_TOOLS"
         read -p "Would you like to install these tools? (Y/n): " INSTALL_TOOLS
         if [[ ! "$INSTALL_TOOLS" =~ ^[Nn]$ ]]; then
             sudo apt-get update
             sudo apt-get install -y $MISSING_TOOLS
-        fi
-    fi
-    
+  fi
+fi
+
     # Initialize Kali tools
     echo "Populating Kali Linux tools registry..."
-    if [ -f "$INSTALL_DIR/extensive_kali_tools.py" ]; then
+if [ -f "$INSTALL_DIR/extensive_kali_tools.py" ]; then
         # Run with clear error handling
         if ! PYTHONPATH="$INSTALL_DIR:$INSTALL_DIR/lib" python3 "$INSTALL_DIR/extensive_kali_tools.py"; then
-            echo "Warning: Failed to populate Kali tools registry. You can run 'paw-kali-tools' manually after installation."
-            echo "Error details:"
+    echo "Warning: Failed to populate Kali tools registry. You can run 'paw-kali-tools' manually after installation."
+    echo "Error details:"
             PYTHONPATH="$INSTALL_DIR:$INSTALL_DIR/lib" python3 "$INSTALL_DIR/extensive_kali_tools.py" 2>&1 || true
-        fi
-    else
+  fi
+else
         echo "Warning: extensive_kali_tools.py not found. Kali tools functionality will be limited."
     fi
 fi
@@ -250,7 +250,7 @@ echo "Verifying installation..."
 # Check command availability
 echo -n "Checking command availability: "
 if command -v paw >/dev/null 2>&1 && command -v PAW >/dev/null 2>&1; then
-    echo "All commands are available."
+  echo "All commands are available."
 else
     echo "FAILED. Command 'paw' or 'PAW' not found in path."
     echo "Try running: sudo ln -s $BIN_DIR/paw /usr/local/bin/paw"
