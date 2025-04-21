@@ -18,6 +18,43 @@ CONFIG_DIR="/etc/paw"
 DOC_DIR="/usr/local/share/doc/paw"
 LOG_DIR="/var/log/paw"
 
+# Check for Kali Linux
+is_kali=false
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [[ "$ID" == "kali" ]]; then
+        is_kali=true
+        echo "Kali Linux detected. Optimizing installation for Kali..."
+    fi
+fi
+
+# Check required packages for Kali Linux
+if [ "$is_kali" = true ]; then
+    echo "Checking for required packages on Kali Linux..."
+    packages_to_install=()
+    
+    # Check for Python3 and pip
+    if ! command -v python3 >/dev/null 2>&1; then
+        packages_to_install+=("python3")
+    fi
+    
+    if ! command -v pip3 >/dev/null 2>&1; then
+        packages_to_install+=("python3-pip")
+    fi
+    
+    # Check for curl
+    if ! command -v curl >/dev/null 2>&1; then
+        packages_to_install+=("curl")
+    fi
+    
+    # Install required packages if needed
+    if [ ${#packages_to_install[@]} -gt 0 ]; then
+        echo "Installing required packages: ${packages_to_install[*]}"
+        apt-get update
+        apt-get install -y "${packages_to_install[@]}"
+    fi
+fi
+
 # Check if Ollama is installed
 if ! command -v ollama >/dev/null 2>&1; then
   echo "Ollama is not installed, which is required for PAW."
@@ -33,7 +70,16 @@ if ! command -v ollama >/dev/null 2>&1; then
       
       # Start Ollama service
       echo "Starting Ollama service..."
-      systemctl enable ollama --now 2>/dev/null || ollama serve &
+      if [ "$is_kali" = true ]; then
+        # On Kali Linux, ensure service is started properly
+        systemctl enable ollama --now 2>/dev/null || {
+          echo "Starting Ollama manually on Kali Linux..."
+          nohup ollama serve > /dev/null 2>&1 &
+        }
+      else
+        # Other Linux distributions
+        systemctl enable ollama --now 2>/dev/null || ollama serve &
+      fi
       
       # Wait for Ollama to start
       echo "Waiting for Ollama to start..."
@@ -80,7 +126,17 @@ cp -r lib/* "$INSTALL_DIR/lib/" 2>/dev/null || mkdir -p "$INSTALL_DIR/lib"
 cp -r custom_commands/* "$INSTALL_DIR/custom_commands/" 2>/dev/null || echo "Note: No custom commands found, creating empty directory"
 cp paw.py "$INSTALL_DIR/"
 cp add_custom_tool.py "$INSTALL_DIR/"
-cp extensive_kali_tools.py "$INSTALL_DIR/" 2>/dev/null || echo "Note: extensive_kali_tools.py not found, Kali tools functionality may be limited"
+
+# Handle the Kali tools file - use the new kali_tools_extension.py if it exists
+if [ -f "kali_tools_extension.py" ]; then
+  echo "Found kali_tools_extension.py, using it for Kali Linux tools support..."
+  cp kali_tools_extension.py "$INSTALL_DIR/extensive_kali_tools.py"
+elif [ -f "extensive_kali_tools.py" ]; then
+  cp extensive_kali_tools.py "$INSTALL_DIR/"
+else
+  echo "Note: No Kali tools file found. Kali tools functionality may be limited"
+fi
+
 cp add_kali_tools.py "$INSTALL_DIR/" 2>/dev/null || echo "Note: add_kali_tools.py not found, skipping"
 cp add_tools_example.py "$INSTALL_DIR/" 2>/dev/null || echo "Note: add_tools_example.py not found, skipping"
 cp ascii_art.py "$INSTALL_DIR/lib/"
@@ -139,9 +195,17 @@ chmod +x "$INSTALL_DIR/custom_commands"/*.py 2>/dev/null || echo "No custom comm
 # Create default configuration
 if [ ! -f "$CONFIG_DIR/config.ini" ]; then
   echo "Creating default configuration..."
-  cat > "$CONFIG_DIR/config.ini" << 'EOF'
+  # Always use Qwen model
+  DEFAULT_MODEL="qwen2.5-coder:7b"
+  
+  # Even for Kali Linux, use Qwen model
+  if [ "$is_kali" = true ]; then
+    echo "Kali Linux detected. Using Qwen model for all installations."
+  fi
+  
+  cat > "$CONFIG_DIR/config.ini" << EOF
 [DEFAULT]
-model = qwen2.5-coder:7b
+model = $DEFAULT_MODEL
 ollama_host = http://localhost:11434
 explain_commands = true
 log_commands = true
@@ -166,6 +230,13 @@ chmod -R 755 "$DOC_DIR"
 # Run extensive_kali_tools.py to populate the tool registry
 if [ -f "$INSTALL_DIR/extensive_kali_tools.py" ]; then
   echo "Populating Kali Linux tools registry..."
+  
+  # For Kali Linux, ensure the proper dependencies are installed
+  if [ "$is_kali" = true ]; then
+    echo "Installing required Python packages for Kali tools functionality..."
+    pip3 install rich requests
+  fi
+  
   python3 "$INSTALL_DIR/extensive_kali_tools.py" || echo "Warning: Failed to populate Kali tools registry. You can run 'paw-kali-tools' manually after installation."
 else
   echo "Note: extensive_kali_tools.py not found. Kali tools functionality will be limited."
@@ -217,8 +288,39 @@ fi
 
 # Add theme to configuration if it doesn't exist
 if ! grep -q "^theme" "$CONFIG_DIR/config.ini"; then
-  echo "theme = cyberpunk" >> "$CONFIG_DIR/config.ini"
-  echo "Added theme configuration (cyberpunk)"
+  if [ "$is_kali" = true ]; then
+    echo "theme = hacker" >> "$CONFIG_DIR/config.ini"
+    echo "Added theme configuration (hacker) for Kali Linux"
+  else
+    echo "theme = cyberpunk" >> "$CONFIG_DIR/config.ini"
+    echo "Added theme configuration (cyberpunk)"
+  fi
+fi
+
+# Kali Linux specific final configurations
+if [ "$is_kali" = true ]; then
+  echo "Performing Kali Linux specific configurations..."
+  
+  # Create a more prominent desktop shortcut for Kali
+  mkdir -p /usr/share/applications
+  cat > /usr/share/applications/paw.desktop << 'EOF'
+[Desktop Entry]
+Name=PAW - Prompt Assisted Workflow
+GenericName=AI-Assisted Command Line Tool
+Comment=Use natural language to run commands and access Kali Linux tools
+Exec=x-terminal-emulator -e "PAW %u"
+Icon=kali-menu
+Terminal=true
+Type=Application
+Categories=Utility;System;Security;
+Keywords=AI;command;line;assistant;kali;
+EOF
+
+  # Ensure Python path includes PAW directories
+  if [ ! -f /etc/profile.d/paw.sh ]; then
+    echo 'export PYTHONPATH="$PYTHONPATH:/usr/local/share/paw:/usr/local/share/paw/lib"' > /etc/profile.d/paw.sh
+    chmod 644 /etc/profile.d/paw.sh
+  fi
 fi
 
 # Check if Ollama is installed and running
@@ -248,7 +350,18 @@ if command -v ollama >/dev/null 2>&1; then
     fi
   else
     echo "WARNING: Ollama service is not running."
-    echo "Start with: ollama serve"
+    if [ "$is_kali" = true ]; then
+      echo "Starting Ollama service for Kali Linux..."
+      nohup ollama serve > /dev/null 2>&1 &
+      sleep 5
+      if curl -s --connect-timeout 5 http://localhost:11434/api/tags >/dev/null 2>&1; then
+        echo "Ollama service started successfully."
+      else
+        echo "Failed to start Ollama. Start manually with: ollama serve"
+      fi
+    else
+      echo "Start with: ollama serve"
+    fi
   fi
 else
   echo "WARNING: Ollama is not installed. PAW requires Ollama to function."
@@ -265,7 +378,14 @@ echo ""
 echo "Additional tools:"
 echo "  add-paw-tool - Register custom tools"
 echo "  paw-config   - Configure PAW settings"
+if [ "$is_kali" = true ]; then
+  echo "  paw-kali-tools - Manage Kali Linux security tools integration"
+fi
 echo ""
 echo "Documentation: /usr/local/share/doc/paw/"
 echo ""
-echo "Thank you for installing PAW!" 
+if [ "$is_kali" = true ]; then
+  echo "PAW is now optimized for Kali Linux. Happy hacking!"
+else
+  echo "Thank you for installing PAW!"
+fi 
