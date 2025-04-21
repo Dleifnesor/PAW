@@ -169,6 +169,44 @@ class PAW:
         
         # Get config for adaptive mode
         self.adaptive_mode = config['DEFAULT'].getboolean('adaptive_mode', False)
+        
+        # Try to load extensive Kali tools if available
+        self.kali_tools_loaded = False
+        try:
+            # First try to import the module
+            sys.path.append('/usr/local/share/paw')
+            if os.path.exists('/usr/local/share/paw/kali_tools_extension.py'):
+                try:
+                    import kali_tools_extension
+                    self.kali_tools = kali_tools_extension.get_all_kali_tools()
+                    self.kali_tools_loaded = True
+                    logger.info("Loaded extensive Kali tools module")
+                except ImportError:
+                    # If import fails, try the local file
+                    logger.warning("Could not import kali_tools_extension module, trying local file")
+                    if os.path.exists('./kali_tools_extension.py'):
+                        sys.path.append('.')
+                        try:
+                            import kali_tools_extension
+                            self.kali_tools = kali_tools_extension.get_all_kali_tools()
+                            self.kali_tools_loaded = True
+                            logger.info("Loaded local extensive Kali tools module")
+                        except ImportError:
+                            logger.warning("Could not import local kali_tools_extension module")
+                    elif os.path.exists('./kali_tools_extension.py'):
+                        # Try loading the kali_tools_extension instead
+                        sys.path.append('.')
+                        try:
+                            # Rename module temporarily for import
+                            import kali_tools_extension as kali_tools_extension
+                            self.kali_tools = kali_tools_extension.get_all_kali_tools()
+                            self.kali_tools_loaded = True
+                            logger.info("Loaded kali_tools_extension module")
+                        except (ImportError, AttributeError):
+                            logger.warning("Could not import kali_tools_extension module or it's missing get_all_kali_tools()")
+        except Exception as e:
+            logger.warning(f"Error loading Kali tools extension: {e}")
+            self.kali_tools = []
     
     def generate_llm_response(self, prompt):
         """Generate a response from the LLM using Ollama."""
@@ -328,6 +366,9 @@ class PAW:
         """Attempt to fix a failed command based on error message."""
         fixed_command = command
         suggestion = None
+        
+        # Define ip_pattern for use in this method
+        ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
         
         # Common error patterns and fixes
         if "No such file" in stderr or "not found" in stderr:
@@ -702,7 +743,7 @@ class PAW:
                 expand=False
             ))
         else:
-            print(f"\n\033[1;33m[{command_index}/{total_commands}] Executing:\033[0m {cmd}")
+            print(f"\n\033[1;33m[{command_index}/{total_commands}] Executing:\033[0m {result['command']}")
             
             # Print result
             if result["exit_code"] == 0:
@@ -841,6 +882,106 @@ The command should directly use the values from the previous output when appropr
                 else:
                     return result, None  # Abort execution
     
+    def _get_tool_descriptions_by_category(self):
+        """Generate detailed tool descriptions by category for context"""
+        if not self.kali_tools_loaded:
+            # Return basic tool info if extensive tools not available
+            return ""
+        
+        # Group tools by category
+        categories = {}
+        for tool in self.kali_tools:
+            category = tool.get('category', 'Other')
+            if category not in categories:
+                categories[category] = []
+            categories[category].append(tool)
+        
+        # Build the detailed context
+        context = ""
+        for category, tools in categories.items():
+            context += f"\n{category.replace('_', ' ').title()}:\n"
+            for tool in tools[:5]:  # Limit to 5 tools per category to keep context manageable
+                name = tool.get('name', 'unknown')
+                description = tool.get('description', '')
+                common_usage = tool.get('common_usage', '')
+                
+                # Add an example if available
+                examples = tool.get('examples', [])
+                example = f"Example: {examples[0]}" if examples else ""
+                
+                context += f"  - {name}: {description}\n    Usage: {common_usage}\n    {example}\n"
+        
+        return context
+
+    def _get_relevant_tool_info(self, request):
+        """Extract relevant tool information based on keywords in the request"""
+        if not self.kali_tools_loaded:
+            return ""
+            
+        # Common security task keywords mapped to tool categories
+        keyword_mappings = {
+            'scan': ['network_scanning', 'vulnerability_scanning'],
+            'recon': ['reconnaissance', 'information_gathering'],
+            'discover': ['network_scanning', 'information_gathering'],
+            'enumerate': ['information_gathering', 'web_application_analysis'],
+            'exploit': ['exploitation', 'post_exploitation'],
+            'crack': ['password_attacks', 'exploitation'],
+            'wireless': ['wireless_attacks', 'bluetooth_attacks'],
+            'wifi': ['wireless_attacks'],
+            'web': ['web_application_analysis', 'vulnerability_scanning'],
+            'sql': ['database_assessment', 'web_application_analysis'],
+            'forensic': ['forensics', 'digital_forensics'],
+            'network': ['network_scanning', 'sniffing_and_spoofing'],
+            'password': ['password_attacks'],
+            'hash': ['password_attacks', 'cryptography'],
+            'sniff': ['sniffing_and_spoofing', 'wireless_attacks'],
+            'spoof': ['sniffing_and_spoofing'],
+            'social': ['social_engineering'],
+            'phish': ['social_engineering'],
+            'analyze': ['forensics', 'vulnerability_scanning'],
+            'reverse': ['reverse_engineering'],
+            'decrypt': ['cryptography', 'password_attacks'],
+            'encrypt': ['cryptography'],
+        }
+        
+        # Find matching categories based on keywords in the request
+        relevant_categories = set()
+        request_lower = request.lower()
+        
+        for keyword, categories in keyword_mappings.items():
+            if keyword in request_lower:
+                for category in categories:
+                    relevant_categories.add(category)
+        
+        # If no specific categories found, include a baseline set
+        if not relevant_categories:
+            relevant_categories = {'information_gathering', 'network_scanning', 'vulnerability_scanning'}
+        
+        # Get tools from relevant categories
+        relevant_tools = []
+        for tool in self.kali_tools:
+            category = tool.get('category', '').lower().replace(' ', '_')
+            if category in relevant_categories:
+                relevant_tools.append(tool)
+        
+        # Format the relevant tools information
+        if not relevant_tools:
+            return ""
+            
+        tools_info = "\nRelevant tools for this task:\n"
+        for tool in relevant_tools[:15]:  # Limit to 15 most relevant tools
+            name = tool.get('name', 'unknown')
+            description = tool.get('description', '')
+            common_usage = tool.get('common_usage', '')
+            examples = tool.get('examples', [])
+            
+            tools_info += f"  - {name}: {description}\n"
+            tools_info += f"    Usage: {common_usage}\n"
+            if examples:
+                tools_info += f"    Example: {examples[0]}\n"
+        
+        return tools_info
+
     def process_request(self, request, adaptive_override=None):
         """Process a natural language request."""
         # Override adaptive mode if specified
@@ -853,7 +994,10 @@ The command should directly use the values from the previous output when appropr
         # Clean up the request
         request = request.replace('\r', '').strip()
         
-        # Generate LLM response
+        # Get relevant tool information based on request keywords
+        relevant_tools_info = self._get_relevant_tool_info(request)
+        
+        # Generate LLM response with enhanced context from Kali tools extension
         context = f"""
 As PAW (Prompt Assisted Workflow), analyze this cybersecurity request and provide a plan of action:
 
@@ -910,6 +1054,7 @@ Consider the following Kali Linux tools and their key options when appropriate:
    - macchanger: -r (random MAC), -m (specified MAC)
    - enum4linux: -a (all enumeration), -u (user), -p (pass)
    - msfvenom: -p (payload), -f (format), -e (encoder)
+{relevant_tools_info}
 
 Design your commands to work sequentially as a workflow, where later commands build on the results of earlier ones.
 For commands that need input from previous commands, use placeholders like <target_ip> or <discovered_hosts>.
