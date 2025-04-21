@@ -110,33 +110,24 @@ fi
 
 echo "Installing PAW - Prompt Assisted Workflow..."
 
-# Create directories
-echo "Creating directories..."
-mkdir -p "$INSTALL_DIR"
+# Create necessary directories
+echo "Creating PAW directories..."
 mkdir -p "$INSTALL_DIR/lib"
+mkdir -p "$INSTALL_DIR/doc"
 mkdir -p "$INSTALL_DIR/tools"
-mkdir -p "$INSTALL_DIR/custom_commands"
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$DOC_DIR"
 mkdir -p "$LOG_DIR"
 
 # Copy files
-echo "Copying files..."
-cp -r lib/* "$INSTALL_DIR/lib/" 2>/dev/null || mkdir -p "$INSTALL_DIR/lib"
-cp -r custom_commands/* "$INSTALL_DIR/custom_commands/" 2>/dev/null || echo "Note: No custom commands found, creating empty directory"
+echo "Installing PAW files..."
+cp -r lib/* "$INSTALL_DIR/lib/"
+cp -r doc/* "$INSTALL_DIR/doc/"
+cp -r tools/* "$INSTALL_DIR/tools/"
 cp paw.py "$INSTALL_DIR/"
+cp add-paw-tool.py "$INSTALL_DIR/"
+cp kali_tools_extension.py "$INSTALL_DIR/"
 cp add_custom_tool.py "$INSTALL_DIR/"
-
-# Handle the Kali tools file - use the new kali_tools_extension.py if it exists
-if [ -f "kali_tools_extension.py" ]; then
-  echo "Found kali_tools_extension.py, using it for Kali Linux tools support..."
-  cp kali_tools_extension.py "$INSTALL_DIR/extensive_kali_tools.py"
-elif [ -f "extensive_kali_tools.py" ]; then
-  cp extensive_kali_tools.py "$INSTALL_DIR/"
-else
-  echo "Note: No Kali tools file found. Kali tools functionality may be limited"
-fi
-
 cp add_kali_tools.py "$INSTALL_DIR/" 2>/dev/null || echo "Note: add_kali_tools.py not found, skipping"
 cp add_tools_example.py "$INSTALL_DIR/" 2>/dev/null || echo "Note: add_tools_example.py not found, skipping"
 cp ascii_art.py "$INSTALL_DIR/lib/"
@@ -173,7 +164,7 @@ chmod +x "$BIN_DIR/add-paw-tool"
 
 cat > "$BIN_DIR/paw-kali-tools" << 'EOF'
 #!/bin/bash
-python3 /usr/local/share/paw/extensive_kali_tools.py "$@"
+python3 /usr/local/share/paw/kali_tools_extension.py "$@"
 EOF
 chmod +x "$BIN_DIR/paw-kali-tools"
 
@@ -228,7 +219,7 @@ chmod -R 777 "$LOG_DIR"  # Allow all users to write logs
 chmod -R 755 "$DOC_DIR"
 
 # Run extensive_kali_tools.py to populate the tool registry
-if [ -f "$INSTALL_DIR/extensive_kali_tools.py" ]; then
+if [ -f "$INSTALL_DIR/kali_tools_extension.py" ]; then
   echo "Populating Kali Linux tools registry..."
   
   # For Kali Linux, ensure the proper dependencies are installed
@@ -237,10 +228,10 @@ if [ -f "$INSTALL_DIR/extensive_kali_tools.py" ]; then
     pip3 install rich requests
   fi
   
-  python3 "$INSTALL_DIR/extensive_kali_tools.py" || echo "Warning: Failed to populate Kali tools registry. You can run 'paw-kali-tools' manually after installation."
+  python3 "$INSTALL_DIR/kali_tools_extension.py" --register || echo "Warning: Failed to populate Kali tools registry. You can run 'paw-kali-tools --register' manually after installation."
 else
-  echo "Note: extensive_kali_tools.py not found. Kali tools functionality will be limited."
-  echo "You can manually add Kali tools later using 'paw-kali-tools' if you install the file."
+  echo "Note: kali_tools_extension.py not found. Kali tools functionality will be limited."
+  echo "You can manually add Kali tools later using 'paw-kali-tools --register' if you install the file."
 fi
 
 # Verifying installation...

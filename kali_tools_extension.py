@@ -10,15 +10,20 @@ import os
 import sys
 from typing import Dict, List, Any, Optional
 
-# Add the current directory to Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(current_dir)
+# Add the PAW lib directory to Python path
+PAW_LIB_DIR = "/usr/local/share/paw/lib"
+if os.path.exists(PAW_LIB_DIR):
+    sys.path.append(PAW_LIB_DIR)
+else:
+    # Fallback to current directory for development
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    sys.path.append(current_dir)
 
 # Try to import the PAW tools registry module
 try:
-    from tools_registry import get_tools_registry, register_tool
-except ImportError:
-    print("Error: Could not import PAW tools_registry module.")
+    from tools_registry import get_tools_registry, add_tool_to_registry
+except ImportError as e:
+    print(f"Error: Could not import PAW tools_registry module: {e}")
     print("Current Python path:")
     for path in sys.path:
         print(f"  - {path}")
@@ -1327,7 +1332,7 @@ def add_extensive_kali_tools(only_show: bool = False) -> List[Dict[str, Any]]:
         if tool["name"].lower() not in existing_tools:
             tools_to_add.append(tool)
             if not only_show:
-                register_tool(tool)
+                add_tool_to_registry(tool)
     
     return tools_to_add
 
@@ -1368,7 +1373,7 @@ def import_tools(input_file: str, only_show: bool = False) -> List[Dict[str, Any
         if tool["name"].lower() not in existing_tools:
             tools_to_add.append(tool)
             if not only_show:
-                register_tool(tool)
+                add_tool_to_registry(tool)
     
     return tools_to_add
 
