@@ -827,24 +827,40 @@ Respond with a JSON object containing:
 The command should directly use the values from the previous output when appropriate, not placeholders.
 """
         
-        response = self.generate_llm_response(context)
-        
-        if "error" in response:
-            return None, None
-        
-        # Extract the next command and explanation
-        next_command = response.get("command", "")
-        if isinstance(next_command, list) and next_command:
-            next_command = next_command[0]
-        
-        explanation = response.get("explanation", "")
-        if isinstance(explanation, list) and explanation:
-            explanation = explanation[0]
-
-        # Substitute any remaining placeholders
-        next_command = self.substitute_variables(next_command, variables)
+        try:
+            if RICH_AVAILABLE:
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[bold cyan]Generating next command...[/]"),
+                    console=console,
+                    transient=True
+                ) as progress:
+                    task = progress.add_task("Thinking...", total=None)
+                    response = self.generate_llm_response(context)
+            else:
+                print("\n\033[1;34m[*] Generating next command...\033[0m")
+                response = self.generate_llm_response(context)
             
-        return next_command, explanation
+            if "error" in response:
+                return None, None
+            
+            # Extract the next command and explanation
+            next_command = response.get("command", "")
+            if isinstance(next_command, list) and next_command:
+                next_command = next_command[0]
+            
+            explanation = response.get("explanation", "")
+            if isinstance(explanation, list) and explanation:
+                explanation = explanation[0]
+
+            # Substitute any remaining placeholders
+            next_command = self.substitute_variables(next_command, variables)
+                
+            return next_command, explanation
+            
+        except Exception as e:
+            logger.error(f"Error generating next command: {e}")
+            return None, None
     
     def interactive_command_selection(self, commands, explanations):
         """Allow user to selectively run commands one by one with y/n confirmation."""
