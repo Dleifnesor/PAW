@@ -764,19 +764,12 @@ class PAW:
             # Add command output
             if result["stdout"].strip():
                 content.append("\n[bold]Output:[/]")
-                # Limit output length to prevent huge displays
-                stdout = result["stdout"].strip()
-                if len(stdout) > 2000:  # Limit to 2000 chars
-                    stdout = stdout[:1997] + "..."
-                content.append(stdout)
+                content.append(result["stdout"].strip())
             
             # Add error output if any
             if result["stderr"].strip():
                 content.append("\n[bold red]Error output:[/]")
-                stderr = result["stderr"].strip()
-                if len(stderr) > 500:  # Limit to 500 chars for errors
-                    stderr = stderr[:497] + "..."
-                content.append(stderr)
+                content.append(result["stderr"].strip())
                 
             # Display the panel
             console.print(Panel(
@@ -1276,8 +1269,8 @@ Provide the specific commands that would accomplish this task, explaining what e
                         # Update variables with any new ones from retry
                         variables = result["variables"]
                 
-                # In adaptive mode, generate the next command based on the current result if this is the last known command
-                if command_index == total_commands - 1 and result["exit_code"] == 0:
+                # In adaptive mode, generate the next command based on the current result
+                if self.adaptive_mode and result["exit_code"] == 0:
                     # Format previous output for prompt
                     prev_output = f"STDOUT:\n{result['stdout']}\n\nSTDERR:\n{result['stderr']}"
                     
