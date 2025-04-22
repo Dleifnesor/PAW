@@ -15,6 +15,8 @@ import httpx
 import importlib.util
 import re
 import socket
+import getpass
+import tempfile
 
 # Add rich library for fancy UI
 try:
@@ -484,14 +486,40 @@ class PAW:
                 ) as progress:
                     task = progress.add_task("Executing...", total=None)
                     
-                    # Execute the command
-                    process = subprocess.Popen(
-                        command,
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True
-                    )
+                    # Check if command requires sudo
+                    if command.startswith('sudo '):
+                        # Get sudo password from user
+                        if RICH_AVAILABLE:
+                            sudo_password = Prompt.ask("[bold red]Enter sudo password[/]", password=True)
+                        else:
+                            sudo_password = getpass.getpass("Enter sudo password: ")
+                        
+                        # Create a temporary file for the password
+                        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+                            f.write(sudo_password)
+                            pass_file = f.name
+                        
+                        try:
+                            # Execute sudo command with password
+                            process = subprocess.Popen(
+                                f"cat {pass_file} | sudo -S {command[5:]}",
+                                shell=True,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True
+                            )
+                        finally:
+                            # Clean up the temporary file
+                            os.unlink(pass_file)
+                    else:
+                        # Execute normal command
+                        process = subprocess.Popen(
+                            command,
+                            shell=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True
+                        )
                     
                     # Wait for command with timeout
                     start_time = time.time()
@@ -560,13 +588,29 @@ class PAW:
                     stderr = "".join(stderr_data)
             else:
                 # Execute the command with timeout for non-rich UI
-                process = subprocess.Popen(
-                    command,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
+                if command.startswith('sudo '):
+                    sudo_password = getpass.getpass("Enter sudo password: ")
+                    with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+                        f.write(sudo_password)
+                        pass_file = f.name
+                    try:
+                        process = subprocess.Popen(
+                            f"cat {pass_file} | sudo -S {command[5:]}",
+                            shell=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True
+                        )
+                    finally:
+                        os.unlink(pass_file)
+                else:
+                    process = subprocess.Popen(
+                        command,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
                 
                 print(f"\033[1;33m[*] Executing (press Ctrl+C to abort)...\033[0m")
                 
@@ -982,6 +1026,159 @@ The command should directly use the values from the previous output when appropr
         
         return tools_info
 
+    def discover_target_values(self, request):
+        """Discover target values needed for the request."""
+        variables = {}
+        
+        # Check if we need to discover WiFi targets
+        if any(word in request.lower() for word in ['wifi', 'wireless', 'network', 'bssid']):
+            # First, check if we have a monitor mode interface
+            if RICH_AVAILABLE:
+                console.print("[bold yellow]Checking for wireless interfaces...[/]")
+            else:
+                print("\033[1;33m[*] Checking for wireless interfaces...\033[0m")
+            
+            # List wireless interfaces
+            result = self.execute_command("iwconfig")
+            if result["exit_code"] == 0:
+                # Look for interfaces in monitor mode
+                monitor_interfaces = []
+                for line in result["stdout"].split('\n'):
+                    if 'Mode:Monitor' in line:
+                        interface = line.split()[0]
+                        monitor_interfaces.append(interface)
+                
+                if monitor_interfaces:
+                    if RICH_AVAILABLE:
+                        console.print(f"[bold green]Found monitor mode interfaces: {', '.join(monitor_interfaces)}[/]")
+                    else:
+                        print(f"\033[1;32m[+] Found monitor mode interfaces: {', '.join(monitor_interfaces)}\033[0m")
+                    variables['monitor_interface'] = monitor_interfaces[0]
+                else:
+                    # No monitor mode interfaces found, need to create one
+                    if RICH_AVAILABLE:
+                        console.print("[bold yellow]No monitor mode interfaces found. Creating one...[/]")
+                    else:
+                        print("\033[1;33m[*] No monitor mode interfaces found. Creating one...\033[0m")
+                    
+                    # List available interfaces
+                    result = self.execute_command("iw dev")
+                    if result["exit_code"] == 0:
+                        interfaces = []
+                        for line in result["stdout"].split('\n'):
+                            if 'Interface' in line:
+                                interfaces.append(line.split()[1])
+                        
+                        if interfaces:
+                            if RICH_AVAILABLE:
+                                interface = Prompt.ask("[bold cyan]Select wireless interface[/]", choices=interfaces)
+                            else:
+                                print(f"Available interfaces: {', '.join(interfaces)}")
+                                interface = input("Select wireless interface: ")
+                            
+                            # Put interface in monitor mode
+                            commands = [
+                                f"sudo airmon-ng check kill",
+                                f"sudo airmon-ng start {interface}",
+                                f"sudo iwconfig {interface}mon"
+                            ]
+                            
+                            for cmd in commands:
+                                result = self.execute_command(cmd)
+                                if result["exit_code"] != 0:
+                                    if RICH_AVAILABLE:
+                                        console.print(f"[bold red]Failed to set up monitor mode: {result['stderr']}[/]")
+                                    else:
+                                        print(f"\033[1;31m[!] Failed to set up monitor mode: {result['stderr']}\033[0m")
+                                    return variables
+                            
+                            variables['monitor_interface'] = f"{interface}mon"
+            
+            # Scan for networks if we have a monitor interface
+            if 'monitor_interface' in variables:
+                if RICH_AVAILABLE:
+                    console.print("[bold yellow]Scanning for wireless networks...[/]")
+                else:
+                    print("\033[1;33m[*] Scanning for wireless networks...\033[0m")
+                
+                # Start airodump-ng in background
+                scan_cmd = f"sudo airodump-ng {variables['monitor_interface']} -w scan --output-format csv"
+                result = self.execute_command(scan_cmd)
+                
+                if result["exit_code"] == 0:
+                    # Parse scan results
+                    networks = []
+                    for line in result["stdout"].split('\n'):
+                        if ':' in line and 'BSSID' not in line:  # Skip header
+                            parts = line.split(',')
+                            if len(parts) >= 2:
+                                bssid = parts[0].strip()
+                                essid = parts[13].strip() if len(parts) > 13 else ''
+                                if essid:
+                                    networks.append((bssid, essid))
+                
+                    if networks:
+                        if RICH_AVAILABLE:
+                            table = Table(show_header=True, header_style="bold magenta")
+                            table.add_column("BSSID")
+                            table.add_column("ESSID")
+                            for bssid, essid in networks:
+                                table.add_row(bssid, essid)
+                            console.print(table)
+                        else:
+                            print("\nAvailable networks:")
+                            for bssid, essid in networks:
+                                print(f"BSSID: {bssid}, ESSID: {essid}")
+                        
+                        # Let user select target
+                        if RICH_AVAILABLE:
+                            target = Prompt.ask("[bold cyan]Select target BSSID[/]")
+                        else:
+                            target = input("Select target BSSID: ")
+                        
+                        variables['target_bssid'] = target
+                        
+                        # Find associated clients
+                        if RICH_AVAILABLE:
+                            console.print("[bold yellow]Scanning for associated clients...[/]")
+                        else:
+                            print("\033[1;33m[*] Scanning for associated clients...\033[0m")
+                        
+                        client_cmd = f"sudo airodump-ng --bssid {target} {variables['monitor_interface']} -w clients --output-format csv"
+                        result = self.execute_command(client_cmd)
+                        
+                        if result["exit_code"] == 0:
+                            clients = []
+                            for line in result["stdout"].split('\n'):
+                                if ':' in line and 'BSSID' not in line and 'Station' not in line:
+                                    parts = line.split(',')
+                                    if len(parts) >= 1:
+                                        client = parts[0].strip()
+                                        if client:
+                                            clients.append(client)
+                        
+                            if clients:
+                                if RICH_AVAILABLE:
+                                    table = Table(show_header=True, header_style="bold magenta")
+                                    table.add_column("Client MAC")
+                                    for client in clients:
+                                        table.add_row(client)
+                                    console.print(table)
+                                else:
+                                    print("\nAssociated clients:")
+                                    for client in clients:
+                                        print(f"Client MAC: {client}")
+                                
+                                # Let user select client
+                                if RICH_AVAILABLE:
+                                    client = Prompt.ask("[bold cyan]Select target client MAC[/]")
+                                else:
+                                    client = input("Select target client MAC: ")
+                                
+                                variables['client_mac'] = client
+    
+        return variables
+
     def process_request(self, request, adaptive_override=None):
         """Process a natural language request."""
         # Override adaptive mode if specified
@@ -994,6 +1191,9 @@ The command should directly use the values from the previous output when appropr
         # Clean up the request
         request = request.replace('\r', '').strip()
         
+        # Discover target values
+        variables = self.discover_target_values(request)
+        
         # Get relevant tool information based on request keywords
         relevant_tools_info = self._get_relevant_tool_info(request)
         
@@ -1003,57 +1203,11 @@ As PAW (Prompt Assisted Workflow), analyze this cybersecurity request and provid
 
 REQUEST: {request}
 
+Available target information:
+{json.dumps(variables, indent=2)}
+
 Consider the following Kali Linux tools and their key options when appropriate:
 
-1. Network scanning:
-   - nmap: -sS (stealth scan), -sV (version detection), -O (OS detection), -A (aggressive), -p (port range), -Pn (skip discovery)
-   - masscan: -p (ports), --rate (packets per second), --range (scan range), --banners (capture banners)
-   - netdiscover: -r (range), -i (interface), -p (passive mode)
-
-2. Web scanning:
-   - nikto: -h (host), -port (port to scan), -ssl, -Tuning (scan tuning)
-   - dirb: [url] [wordlist], -a (user agent), -z (delay), -o (output file)
-   - gobuster: -u (url), -w (wordlist), -x (extensions), -t (threads)
-   - wpscan: --url (WordPress URL), --api-token, -e (enumerate)
-
-3. Vulnerability scanning:
-   - openvas: -u (user), -p (password), -T (target)
-   - nessus: similar to OpenVAS with web interface
-   - lynis: audit system, --pentest (pentest mode)
-
-4. Exploitation:
-   - metasploit: use (module), set (option), exploit/run, sessions
-   - sqlmap: -u (URL), --data (POST data), --dbms (database type), --dump
-   - hydra: -l/-L (login), -p/-P (password), -t (tasks), service://server
-
-5. Reconnaissance:
-   - whois: [domain], -h (host)
-   - theHarvester: -d (domain), -b (source), -l (limit)
-   - recon-ng: use (module), set (option), run
-   - maltego: GUI-based with transforms
-
-6. Password attacks:
-   - hashcat: -m (hash type), -a (attack mode), -o (output file)
-   - john: --wordlist (wordlist file), --rules, --format (hash type)
-   - crunch: [min] [max] [charset], -t (pattern), -o (output)
-
-7. Wireless:
-   - aircrack-ng: -w (wordlist), -b (BSSID)
-   - wifite: -wpa (attack WPA), -wep (attack WEP), -wps (attack WPS)
-   - kismet: -c (interface), -f (file), -s (server mode)
-
-8. Forensics and analysis:
-   - volatility: -f (file), --profile (OS profile), plugin commands
-   - autopsy: GUI-based forensic platform
-   - wireshark/tshark: -i (interface), -c (packet count), -r (read file)
-   - tcpdump: -i (interface), -n (don't resolve), -w (write to file)
-
-9. Specialized tools:
-   - binwalk: -e (extract), -M (recursive scan)
-   - steghide: embed/extract, -sf (stego file), -p (passphrase)
-   - macchanger: -r (random MAC), -m (specified MAC)
-   - enum4linux: -a (all enumeration), -u (user), -p (pass)
-   - msfvenom: -p (payload), -f (format), -e (encoder)
 {relevant_tools_info}
 
 Design your commands to work sequentially as a workflow, where later commands build on the results of earlier ones.
@@ -1061,7 +1215,7 @@ For commands that need input from previous commands, use placeholders like <targ
 Provide the specific commands that would accomplish this task, explaining what each command does.
 """
         
-        response = self.generate_llm_response(context + request)
+        response = self.generate_llm_response(context)
         
         if "error" in response:
             if RICH_AVAILABLE:
@@ -1192,6 +1346,7 @@ def main():
     parser.add_argument("--version", action="store_true", help="Show version")
     parser.add_argument("--timeout", type=float, help="Set LLM request timeout in seconds")
     parser.add_argument("--theme", choices=list(THEMES.keys()), help="Set UI theme")
+    parser.add_argument("--iterative", action="store_true", help="Generate and execute commands one at a time")
     
     # Create a mutually exclusive group for progressive mode options
     mode_group = parser.add_mutually_exclusive_group()
@@ -1236,15 +1391,19 @@ def main():
     if args.request:
         # Process the request with adaptive mode if specified
         # --prog is an alternative to --adaptive
-        adaptive_mode = args.adaptive or args.prog
+        adaptive_mode = args.adaptive or args.prog or args.iterative
         paw.process_request(args.request, adaptive_mode)
     else:
         if RICH_AVAILABLE:
             console.print("[bold cyan]Welcome to PAW - Prompt Assisted Workflow[/]")
             console.print("[cyan]Type 'exit' or 'quit' to exit[/]")
+            if args.iterative:
+                console.print("[yellow]Running in iterative mode - commands will be generated and executed one at a time[/]")
         else:
             print("\033[1;34m[*] Welcome to PAW - Prompt Assisted Workflow\033[0m")
             print("\033[1;34m[*] Type 'exit' or 'quit' to exit\033[0m")
+            if args.iterative:
+                print("\033[1;33m[*] Running in iterative mode - commands will be generated and executed one at a time\033[0m")
         
         while True:
             try:
@@ -1264,7 +1423,7 @@ def main():
                     break
                 
                 if request.strip():
-                    paw.process_request(request)
+                    paw.process_request(request, args.iterative)
                     
             except KeyboardInterrupt:
                 if RICH_AVAILABLE:
