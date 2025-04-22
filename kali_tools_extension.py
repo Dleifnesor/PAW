@@ -11,6 +11,10 @@ import sys
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 
+# Global variable declaration
+global KALI_TOOLS
+KALI_TOOLS = []
+
 # Add the PAW lib directory to Python path
 PAW_LIB_DIR = "/usr/local/share/paw/lib"
 if os.path.exists(PAW_LIB_DIR):
@@ -1314,27 +1318,25 @@ KALI_TOOLS.extend([
 ])
 
 def add_extensive_kali_tools(only_show: bool = False) -> List[Dict[str, Any]]:
-    """
-    Add extensive Kali Linux tools to the PAW registry.
-    
-    Args:
-        only_show: If True, only show tools that would be added without actually adding them
+    """Add extensive Kali tools to the registry."""
+    global KALI_TOOLS
+    try:
+        if only_show:
+            print(json.dumps(KALI_TOOLS, indent=2))
+            return KALI_TOOLS
         
-    Returns:
-        List of tools that would be or were added
-    """
-    registry = get_tools_registry()
-    existing_tools = {tool["name"].lower(): tool for tool in registry}
-    
-    tools_to_add = []
-    
-    for tool in KALI_TOOLS:
-        if tool["name"].lower() not in existing_tools:
-            tools_to_add.append(tool)
-            if not only_show:
-                add_tool_to_registry(tool)
-    
-    return tools_to_add
+        for tool in KALI_TOOLS:
+            add_tool_to_registry(
+                name=tool['name'],
+                category=tool['category'],
+                description=tool['description'],
+                common_usage=tool['common_usage'],
+                examples=tool['examples']
+            )
+        return KALI_TOOLS
+    except Exception as e:
+        print(f"Error adding tools: {e}")
+        return []
 
 def export_tools(output_file: str) -> None:
     """
@@ -1351,31 +1353,23 @@ def export_tools(output_file: str) -> None:
     print(f"Exported {len(registry)} tools to {output_file}")
 
 def import_tools(input_file: str, only_show: bool = False) -> List[Dict[str, Any]]:
-    """
-    Import tools from a JSON file.
-    
-    Args:
-        input_file: Path to the input JSON file
-        only_show: If True, only show tools that would be added without actually adding them
+    """Import tools from a JSON file."""
+    global KALI_TOOLS
+    try:
+        with open(input_file, 'r') as f:
+            imported_tools = json.load(f)
         
-    Returns:
-        List of tools that would be or were added
-    """
-    registry = get_tools_registry()
-    existing_tools = {tool["name"].lower(): tool for tool in registry}
-    
-    with open(input_file, 'r') as f:
-        import_tools = json.load(f)
-    
-    tools_to_add = []
-    
-    for tool in import_tools:
-        if tool["name"].lower() not in existing_tools:
-            tools_to_add.append(tool)
-            if not only_show:
-                add_tool_to_registry(tool)
-    
-    return tools_to_add
+        if only_show:
+            print(json.dumps(imported_tools, indent=2))
+            return imported_tools
+        
+        # Update the global KALI_TOOLS variable
+        KALI_TOOLS = imported_tools
+        return imported_tools
+        
+    except Exception as e:
+        print(f"Error importing tools: {e}")
+        return []
 
 def categorize_tools(tools: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """
@@ -1467,33 +1461,18 @@ if __name__ == '__main__':
 
 # Add functions to access tool information
 def get_all_kali_tools():
-    """
-    Get all available Kali Linux tools.
-    
-    Returns:
-        List of dictionaries containing tool information
-    """
+    """Get all Kali tools."""
+    global KALI_TOOLS
     return KALI_TOOLS
 
 def get_tool_categories():
-    """
-    Get all available tool categories.
-    
-    Returns:
-        List of category names
-    """
-    return CATEGORIES
+    """Get all tool categories."""
+    global KALI_TOOLS
+    return list(set(tool['category'] for tool in KALI_TOOLS))
 
 def get_tools_by_category(category):
-    """
-    Get all tools in a specific category.
-    
-    Args:
-        category: The category name to filter by
-        
-    Returns:
-        List of tools in the specified category
-    """
+    """Get tools by category."""
+    global KALI_TOOLS
     return [tool for tool in KALI_TOOLS if tool["category"].lower() == category.lower()]
 
 def get_tool_info(tool_name):
