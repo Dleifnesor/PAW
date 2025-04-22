@@ -676,6 +676,57 @@ class PAW:
     
     def display_plan(self, plan):
         """Display the action plan with fancy formatting."""
+        # Check if plan is a string that contains JSON
+        if isinstance(plan, str) and plan.strip().startswith('{'):
+            try:
+                plan_data = json.loads(plan)
+                if isinstance(plan_data, dict):
+                    plan = plan_data.get('plan', [])
+                    commands = plan_data.get('commands', [])
+                    explanations = plan_data.get('explanation', [])
+                    
+                    # Display the plan
+                    if RICH_AVAILABLE:
+                        steps_text = "\n".join(f"• {step}" for step in plan)
+                        console.print(Panel(
+                            steps_text,
+                            title="[bold]Action Plan[/]",
+                            border_style=self.theme['border_style'],
+                            padding=(1, 2)
+                        ))
+                        
+                        # Display commands and explanations
+                        table = Table(
+                            show_header=True,
+                            header_style=f"bold {self.theme['primary']}", 
+                            border_style=self.theme['border_style'],
+                            padding=(0, 1)
+                        )
+                        table.add_column("Command", style="bold yellow")
+                        table.add_column("Explanation")
+                        
+                        for cmd, exp in zip(commands, explanations):
+                            table.add_row(Syntax(cmd, "bash", theme=self.theme['code_theme']), exp)
+                        
+                        console.print(Panel(
+                            table,
+                            title="[bold]Proposed Commands[/]",
+                            border_style=self.theme['border_style'],
+                            padding=(1, 1)
+                        ))
+                    else:
+                        print("\n\033[1;34m[*] Plan:\033[0m")
+                        for step in plan:
+                            print(f"  - {step}")
+                        print("\n\033[1;34m[*] Proposed commands:\033[0m")
+                        for i, (cmd, exp) in enumerate(zip(commands, explanations), 1):
+                            print(f"\n  \033[1;33m[{i}] Command:\033[0m {cmd}")
+                            print(f"      \033[1;32mExplanation:\033[0m {exp}")
+                    return
+            except json.JSONDecodeError:
+                pass
+        
+        # If not JSON or parsing failed, display as normal
         if RICH_AVAILABLE:
             steps_text = "\n".join(f"• {step}" for step in plan)
             console.print(Panel(
@@ -828,18 +879,8 @@ The command should directly use the values from the previous output when appropr
 """
         
         try:
-            if RICH_AVAILABLE:
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[bold cyan]Generating next command...[/]"),
-                    console=console,
-                    transient=True
-                ) as progress:
-                    task = progress.add_task("Thinking...", total=None)
-                    response = self.generate_llm_response(context)
-            else:
-                print("\n\033[1;34m[*] Generating next command...\033[0m")
-                response = self.generate_llm_response(context)
+            # Generate response without any display
+            response = self.generate_llm_response(context)
             
             if "error" in response:
                 return None, None
