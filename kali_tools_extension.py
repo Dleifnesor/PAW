@@ -9,6 +9,7 @@ import json
 import os
 import sys
 from typing import Dict, List, Any, Optional
+from pathlib import Path
 
 # Add the PAW lib directory to Python path
 PAW_LIB_DIR = "/usr/local/share/paw/lib"
@@ -16,8 +17,7 @@ if os.path.exists(PAW_LIB_DIR):
     sys.path.append(PAW_LIB_DIR)
 else:
     # Fallback to current directory for development
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    sys.path.append(current_dir)
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Try to import the PAW tools registry module
 try:
@@ -1412,47 +1412,58 @@ def print_categorized_tools(categorized_tools: Dict[str, List[Dict[str, Any]]]) 
         for tool in sorted(tools, key=lambda x: x["name"]):
             print(f"  - {tool['name']}: {tool['description']}")
 
-def main() -> None:
-    """
-    Main function to parse arguments and perform actions.
-    """
-    parser = argparse.ArgumentParser(description="PAW Kali Linux Tools Extension")
+def register_tools():
+    """Register all Kali tools with the PAW tools registry."""
+    try:
+        for tool in KALI_TOOLS:
+            add_tool_to_registry(
+                name=tool['name'],
+                category=tool['category'],
+                description=tool['description'],
+                common_usage=tool['common_usage'],
+                examples=tool['examples']
+            )
+        print("Successfully registered all Kali tools with PAW.")
+        return True
+    except Exception as e:
+        print(f"Error registering tools: {e}")
+        return False
+
+def main():
+    parser = argparse.ArgumentParser(description='Kali Tools Extension for PAW')
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--show", action="store_true", help="Show tools that would be added without adding them")
-    group.add_argument("--export", metavar="FILE", help="Export all tools to a JSON file")
-    group.add_argument("--import", dest="import_file", metavar="FILE", help="Import tools from a JSON file")
+    group.add_argument('--show', action='store_true', help='Show all available Kali tools')
+    group.add_argument('--export', metavar='FILE', help='Export tools to JSON file')
+    group.add_argument('--import', metavar='FILE', help='Import tools from JSON file')
+    group.add_argument('--register', action='store_true', help='Register tools with PAW')
+    
     args = parser.parse_args()
     
     if args.show:
-        tools_to_add = add_extensive_kali_tools(only_show=True)
-        if tools_to_add:
-            print(f"\nFound {len(tools_to_add)} new tools to add:")
-            categorized_tools = categorize_tools(tools_to_add)
-            print_categorized_tools(categorized_tools)
-            print(f"\nRun without --show to add these {len(tools_to_add)} tools to the registry.")
-        else:
-            print("\nAll tools are already registered.")
-    
+        print(json.dumps(KALI_TOOLS, indent=2))
     elif args.export:
-        export_tools(args.export)
-    
-    elif args.import_file:
-        tools_to_add = import_tools(args.import_file, only_show=args.show)
-        if tools_to_add:
-            print(f"\nImported {len(tools_to_add)} new tools from {args.import_file}")
-            categorized_tools = categorize_tools(tools_to_add)
-            print_categorized_tools(categorized_tools)
+        with open(args.export, 'w') as f:
+            json.dump(KALI_TOOLS, f, indent=2)
+        print(f"Tools exported to {args.export}")
+    elif getattr(args, 'import'):
+        try:
+            with open(getattr(args, 'import'), 'r') as f:
+                imported_tools = json.load(f)
+            global KALI_TOOLS
+            KALI_TOOLS = imported_tools
+            print(f"Tools imported from {getattr(args, 'import')}")
+        except Exception as e:
+            print(f"Error importing tools: {e}")
+    elif args.register:
+        if register_tools():
+            sys.exit(0)
         else:
-            print("\nAll tools from the import file are already registered.")
-    
+            sys.exit(1)
     else:
-        tools_to_add = add_extensive_kali_tools(only_show=False)
-        if tools_to_add:
-            print(f"\nAdded {len(tools_to_add)} new tools to the PAW registry.")
-            categorized_tools = categorize_tools(tools_to_add)
-            print_categorized_tools(categorized_tools)
-        else:
-            print("\nAll tools are already registered.")
+        parser.print_help()
+
+if __name__ == '__main__':
+    main()
 
 # Add functions to access tool information
 def get_all_kali_tools():
