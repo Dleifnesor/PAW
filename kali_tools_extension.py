@@ -10,6 +10,7 @@ import os
 import sys
 from typing import Dict, List, Any, Optional
 from pathlib import Path
+from tools_registry import add_tool_to_registry
 
 # Global variable declaration
 global KALI_TOOLS
@@ -23,17 +24,29 @@ else:
     # Fallback to current directory for development
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Try to import the PAW tools registry module
-try:
-    from tools_registry import get_tools_registry, add_tool_to_registry
-except ImportError as e:
-    print(f"Error: Could not import PAW tools_registry module: {e}")
-    print("Current Python path:")
-    for path in sys.path:
-        print(f"  - {path}")
-    print("\nMake sure PAW is installed correctly and this script is in the correct directory.")
-    print("You can install PAW by running: bash install.sh")
-    sys.exit(1)
+class KaliToolsManager:
+    _instance = None
+    _tools = []
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(KaliToolsManager, cls).__new__(cls)
+        return cls._instance
+
+    @classmethod
+    def get_tools(cls):
+        return cls._tools
+
+    @classmethod
+    def set_tools(cls, tools):
+        cls._tools = tools
+
+    @classmethod
+    def add_tools(cls, tools):
+        cls._tools.extend(tools)
+
+# Initialize the tools manager
+tools_manager = KaliToolsManager()
 
 # Define tool categories
 CATEGORIES = [
@@ -43,7 +56,6 @@ CATEGORIES = [
     "Database Assessment",
     "Password Attacks",
     "Wireless Attacks",
-    "Bluetooth Attacks",
     "Reverse Engineering",
     "Exploitation Tools",
     "Sniffing & Spoofing",
@@ -51,13 +63,11 @@ CATEGORIES = [
     "Forensics",
     "Reporting Tools",
     "Social Engineering Tools",
-    "System Services",
-    "Cryptography",
-    "Hardware Hacking"
+    "System Services"
 ]
 
-# Comprehensive list of Kali Linux tools with detailed information
-KALI_TOOLS = [
+# Initialize tools list
+tools_manager.set_tools([
     # Information Gathering
     {
         "name": "nmap",
@@ -480,7 +490,7 @@ KALI_TOOLS = [
             {"description": "Show service dependencies", "command": "systemd-analyze dot"}
         ]
     }
-]
+])
 
 # Add additional tools to KALI_TOOLS
 
@@ -1319,13 +1329,13 @@ KALI_TOOLS.extend([
 
 def add_extensive_kali_tools(only_show: bool = False) -> List[Dict[str, Any]]:
     """Add extensive Kali tools to the registry."""
-    global KALI_TOOLS
     try:
+        tools = tools_manager.get_tools()
         if only_show:
-            print(json.dumps(KALI_TOOLS, indent=2))
-            return KALI_TOOLS
+            print(json.dumps(tools, indent=2))
+            return tools
         
-        for tool in KALI_TOOLS:
+        for tool in tools:
             add_tool_to_registry(
                 name=tool['name'],
                 category=tool['category'],
@@ -1333,28 +1343,23 @@ def add_extensive_kali_tools(only_show: bool = False) -> List[Dict[str, Any]]:
                 common_usage=tool['common_usage'],
                 examples=tool['examples']
             )
-        return KALI_TOOLS
+        return tools
     except Exception as e:
         print(f"Error adding tools: {e}")
         return []
 
 def export_tools(output_file: str) -> None:
-    """
-    Export all tools to a JSON file.
-    
-    Args:
-        output_file: Path to the output JSON file
-    """
-    registry = get_tools_registry()
-    
-    with open(output_file, 'w') as f:
-        json.dump(registry, f, indent=4)
-    
-    print(f"Exported {len(registry)} tools to {output_file}")
+    """Export tools to a JSON file."""
+    try:
+        tools = tools_manager.get_tools()
+        with open(output_file, 'w') as f:
+            json.dump(tools, f, indent=2)
+        print(f"Successfully exported tools to {output_file}")
+    except Exception as e:
+        print(f"Error exporting tools: {e}")
 
 def import_tools(input_file: str, only_show: bool = False) -> List[Dict[str, Any]]:
     """Import tools from a JSON file."""
-    global KALI_TOOLS
     try:
         with open(input_file, 'r') as f:
             imported_tools = json.load(f)
@@ -1363,8 +1368,8 @@ def import_tools(input_file: str, only_show: bool = False) -> List[Dict[str, Any
             print(json.dumps(imported_tools, indent=2))
             return imported_tools
         
-        # Update the global KALI_TOOLS variable
-        KALI_TOOLS = imported_tools
+        # Update the tools list
+        tools_manager.set_tools(imported_tools)
         return imported_tools
         
     except Exception as e:
@@ -1372,44 +1377,27 @@ def import_tools(input_file: str, only_show: bool = False) -> List[Dict[str, Any
         return []
 
 def categorize_tools(tools: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Categorize tools by their category.
-    
-    Args:
-        tools: List of tool dictionaries
-    
-    Returns:
-        Dictionary mapping categories to lists of tools
-    """
-    categories = {}
-    
+    """Categorize tools by their category."""
+    categorized = {}
     for tool in tools:
-        category = tool.get("category", "Uncategorized")
-        if category not in categories:
-            categories[category] = []
-        categories[category].append(tool)
-    
-    return categories
+        category = tool.get('category', 'Other')
+        if category not in categorized:
+            categorized[category] = []
+        categorized[category].append(tool)
+    return categorized
 
 def print_categorized_tools(categorized_tools: Dict[str, List[Dict[str, Any]]]) -> None:
-    """
-    Print tools categorized by their category.
-    
-    Args:
-        categorized_tools: Dictionary mapping categories to lists of tools
-    """
-    print("\nTools by Category:")
-    print("-----------------")
-    
-    for category, tools in sorted(categorized_tools.items()):
-        print(f"\n{category} ({len(tools)} tools):")
-        for tool in sorted(tools, key=lambda x: x["name"]):
+    """Print tools organized by category."""
+    for category, tools in categorized_tools.items():
+        print(f"\n{category}:")
+        for tool in tools:
             print(f"  - {tool['name']}: {tool['description']}")
 
 def register_tools():
     """Register all Kali tools with the PAW tools registry."""
     try:
-        for tool in KALI_TOOLS:
+        tools = tools_manager.get_tools()
+        for tool in tools:
             add_tool_to_registry(
                 name=tool['name'],
                 category=tool['category'],
@@ -1427,32 +1415,25 @@ def main():
     parser = argparse.ArgumentParser(description='Kali Tools Extension for PAW')
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--show', action='store_true', help='Show all available Kali tools')
-    group.add_argument('--export', metavar='FILE', help='Export tools to JSON file')
-    group.add_argument('--import', metavar='FILE', help='Import tools from JSON file')
-    group.add_argument('--register', action='store_true', help='Register tools with PAW')
+    group.add_argument('--register', action='store_true', help='Register all Kali tools with PAW')
+    group.add_argument('--export', type=str, help='Export tools to a JSON file')
+    group.add_argument('--import', type=str, dest='import_file', help='Import tools from a JSON file')
     
     args = parser.parse_args()
     
     if args.show:
-        print(json.dumps(KALI_TOOLS, indent=2))
-    elif args.export:
-        with open(args.export, 'w') as f:
-            json.dump(KALI_TOOLS, f, indent=2)
-        print(f"Tools exported to {args.export}")
-    elif getattr(args, 'import'):
-        try:
-            with open(getattr(args, 'import'), 'r') as f:
-                imported_tools = json.load(f)
-            global KALI_TOOLS
-            KALI_TOOLS = imported_tools
-            print(f"Tools imported from {getattr(args, 'import')}")
-        except Exception as e:
-            print(f"Error importing tools: {e}")
+        tools = tools_manager.get_tools()
+        categorized = categorize_tools(tools)
+        print_categorized_tools(categorized)
     elif args.register:
         if register_tools():
-            sys.exit(0)
+            print("Successfully registered all Kali tools with PAW.")
         else:
-            sys.exit(1)
+            print("Failed to register Kali tools with PAW.")
+    elif args.export:
+        export_tools(args.export)
+    elif args.import_file:
+        import_tools(args.import_file)
     else:
         parser.print_help()
 
@@ -1462,18 +1443,17 @@ if __name__ == '__main__':
 # Add functions to access tool information
 def get_all_kali_tools():
     """Get all Kali tools."""
-    global KALI_TOOLS
-    return KALI_TOOLS
+    return tools_manager.get_tools()
 
 def get_tool_categories():
     """Get all tool categories."""
-    global KALI_TOOLS
-    return list(set(tool['category'] for tool in KALI_TOOLS))
+    tools = tools_manager.get_tools()
+    return list(set(tool['category'] for tool in tools))
 
 def get_tools_by_category(category):
     """Get tools by category."""
-    global KALI_TOOLS
-    return [tool for tool in KALI_TOOLS if tool["category"].lower() == category.lower()]
+    tools = tools_manager.get_tools()
+    return [tool for tool in tools if tool["category"].lower() == category.lower()]
 
 def get_tool_info(tool_name):
     """
@@ -1485,7 +1465,8 @@ def get_tool_info(tool_name):
     Returns:
         Dictionary containing tool information or None if not found
     """
-    for tool in KALI_TOOLS:
+    tools = tools_manager.get_tools()
+    for tool in tools:
         if tool["name"].lower() == tool_name.lower():
             return tool
     return None
