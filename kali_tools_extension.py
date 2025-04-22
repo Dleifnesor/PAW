@@ -10,19 +10,41 @@ import os
 import sys
 from typing import Dict, List, Any, Optional
 from pathlib import Path
-from tools_registry import add_tool_to_registry
+
+# Add the current directory to the Python path first
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
+# Try to import the PAW tools registry module
+try:
+    from tools_registry import add_tool_to_registry
+except ImportError as e:
+    # If not found in current directory, try the PAW lib directory
+    PAW_LIB_DIR = "/usr/local/share/paw/lib"
+    if os.path.exists(PAW_LIB_DIR):
+        sys.path.insert(0, PAW_LIB_DIR)
+        try:
+            from tools_registry import add_tool_to_registry
+        except ImportError:
+            print(f"Error: Could not import PAW tools_registry module: {e}")
+            print("Current Python path:")
+            for path in sys.path:
+                print(f"  - {path}")
+            print("\nMake sure PAW is installed correctly and this script is in the correct directory.")
+            print("You can install PAW by running: bash install.sh")
+            sys.exit(1)
+    else:
+        print(f"Error: Could not import PAW tools_registry module: {e}")
+        print("Current Python path:")
+        for path in sys.path:
+            print(f"  - {path}")
+        print("\nMake sure PAW is installed correctly and this script is in the correct directory.")
+        print("You can install PAW by running: bash install.sh")
+        sys.exit(1)
 
 # Global variable declaration
 global KALI_TOOLS
 KALI_TOOLS = []
-
-# Add the PAW lib directory to Python path
-PAW_LIB_DIR = "/usr/local/share/paw/lib"
-if os.path.exists(PAW_LIB_DIR):
-    sys.path.append(PAW_LIB_DIR)
-else:
-    # Fallback to current directory for development
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 class KaliToolsManager:
     _instance = None
