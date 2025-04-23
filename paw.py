@@ -1241,8 +1241,37 @@ The command should directly use the values from the previous output when appropr
         # Clean up the request
         request = request.replace('\r', '').strip()
         
-        # Discover target values
-        variables = self.discover_target_values(request)
+        # Define patterns for different types of network identifiers
+        patterns = {
+            'ip': r'\b(?:\d{1,3}\.){3}\d{1,3}\b',
+            'fqdn': r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b',
+            'mac': r'\b(?:[0-9A-Fa-f]{2}[:-]){5}(?:[0-9A-Fa-f]{2})\b',
+            'cidr': r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b',
+            'port': r'\b(?:port|p)\s+(\d{1,5})\b',
+            'protocol': r'\b(?:tcp|udp|icmp)\b'
+        }
+        
+        # Extract and store identifiers
+        variables = {}
+        for identifier_type, pattern in patterns.items():
+            matches = re.finditer(pattern, request)
+            for match in matches:
+                value = match.group(0)
+                # Store the value in variables
+                if identifier_type not in variables:
+                    variables[identifier_type] = []
+                variables[identifier_type].append(value)
+                # Replace in request with placeholder
+                request = request.replace(value, f'<{identifier_type}>')
+        
+        # Add single values for convenience
+        for identifier_type in patterns:
+            if identifier_type in variables and variables[identifier_type]:
+                variables[f'target_{identifier_type}'] = variables[identifier_type][0]
+        
+        # Discover additional target values
+        discovered_vars = self.discover_target_values(request)
+        variables.update(discovered_vars)
         
         # Get relevant tool information based on request keywords
         relevant_tools_info = self._get_relevant_tool_info(request)
@@ -1261,7 +1290,7 @@ Consider the following Kali Linux tools and their key options when appropriate:
 {relevant_tools_info}
 
 Design your commands to work sequentially as a workflow, where later commands build on the results of earlier ones.
-For commands that need input from previous commands, use placeholders like <target_ip> or <discovered_hosts>.
+For commands that need input from previous commands, use placeholders like <target_ip>, <target_fqdn>, <target_mac>, etc.
 Provide the specific commands that would accomplish this task, explaining what each command does.
 """
         
@@ -1290,13 +1319,20 @@ Provide the specific commands that would accomplish this task, explaining what e
             return
         
         # Execute commands one by one
-        variables = {}  # Store variables for command chaining
         command_index = 0
         total_commands = len(commands)
         
         while command_index < total_commands:
             cmd = commands[command_index]
             explanation = explanations[command_index] if command_index < len(explanations) else ""
+            
+            # Replace all placeholders with actual values
+            for identifier_type in patterns:
+                placeholder = f'<{identifier_type}>'
+                if placeholder in cmd and identifier_type in variables:
+                    # Use the first value if multiple exist
+                    value = variables[identifier_type][0]
+                    cmd = cmd.replace(placeholder, value)
             
             # Display the command and ask for confirmation
             if self.display_single_command(cmd, explanation, command_index + 1, total_commands):
@@ -1340,24 +1376,19 @@ Provide the specific commands that would accomplish this task, explaining what e
                         continue_workflow = input("\n\033[1;35m[?] Generate next command based on this output? (y/n): \033[0m").lower() == 'y'
                     
                     if continue_workflow:
-                        if RICH_AVAILABLE:
-                            with Progress(
-                                SpinnerColumn(),
-                                TextColumn("[bold cyan]Generating next command...[/]"),
-                                console=console,
-                                transient=True
-                            ) as progress:
-                                task = progress.add_task("Thinking...", total=None)
-                                next_cmd, next_explanation = self.generate_next_command(
-                                    request, result["command"], prev_output, variables
-                                )
-                        else:
-                            print("\n\033[1;34m[*] Generating next command...\033[0m")
-                            next_cmd, next_explanation = self.generate_next_command(
-                                request, result["command"], prev_output, variables
-                            )
+                        # Generate next command without any display
+                        next_cmd, next_explanation = self.generate_next_command(
+                            request, result["command"], prev_output, variables
+                        )
                         
                         if next_cmd:
+                            # Replace all placeholders in next command
+                            for identifier_type in patterns:
+                                placeholder = f'<{identifier_type}>'
+                                if placeholder in next_cmd and identifier_type in variables:
+                                    value = variables[identifier_type][0]
+                                    next_cmd = next_cmd.replace(placeholder, value)
+                            
                             # Add the command to our list and continue loop
                             commands.append(next_cmd)
                             explanations.append(next_explanation)
