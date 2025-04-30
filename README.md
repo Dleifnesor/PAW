@@ -1,4 +1,5 @@
 # OA - Ollama Assistant
+![image](https://github.com/user-attachments/assets/b5770a66-d15e-4f19-a2a6-9dbb64568368)
 
 OA (Ollama Assistant) is a command-line tool for Kali Linux that uses AI to generate and execute commands based on natural language prompts. The tool leverages Ollama, a local AI model runner, with the CodeLlama model to understand and generate Linux commands.
 
