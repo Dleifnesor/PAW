@@ -34,6 +34,7 @@ This will:
 Note: The installation process might take some time, especially downloading the AI model.
 
 ## Usage
+![image](https://github.com/user-attachments/assets/68c8f532-a55c-4df6-b032-c77e9c152668)
 
 Start the tool by typing:
 
