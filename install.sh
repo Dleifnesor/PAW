@@ -359,36 +359,65 @@ else
   echo "Visit https://ollama.ai/download for installation instructions."
 fi
 
+# Display usage information
 echo ""
-echo "Installation complete!"
-echo "PAW is now installed system-wide and can be executed from anywhere."
+echo "PAW (Prompt Assisted Workflow) Usage Information:"
+echo "================================================"
 echo ""
-echo "Usage:"
-echo "  PAW \"your natural language command\""
+echo "Basic Usage:"
+echo "-----------"
+echo "1. Interactive Mode:"
+echo "   - Simply type 'paw' or 'PAW' to enter interactive mode"
+echo "   - Ask questions or request tasks in natural language"
+echo "   - PAW will help you with coding, system tasks, and more"
 echo ""
-echo "Additional tools:"
-echo "  add-paw-tool - Register custom tools"
-echo "  paw-config   - Configure PAW settings"
-if [ "$is_kali" = true ]; then
-  echo "  paw-kali-tools - Manage Kali Linux security tools integration"
+echo "2. Command Mode:"
+echo "   - Use 'paw <your question>' for single commands"
+echo "   - Example: paw 'how do I list files in a directory?'"
+echo ""
+echo "Advanced Features:"
+echo "----------------"
+echo "1. Iterative Development:"
+echo "   - PAW supports iterative development cycles"
+echo "   - It can help you build, test, and refine code"
+echo "   - Use 'paw --iterative' for iterative mode"
+echo ""
+echo "2. Tool Management:"
+echo "   - Add custom tools: 'add-paw-tool <tool_name>'"
+echo "   - Configure PAW: 'paw-config'"
+echo "   - Kali Linux tools: 'paw-kali-tools'"
+echo ""
+echo "3. Configuration Options:"
+echo "   - Edit /etc/paw/config.ini to customize settings"
+echo "   - Adjust model, timeouts, and other parameters"
+echo ""
+echo "4. Logging:"
+echo "   - All interactions are logged to /var/log/paw"
+echo "   - Useful for reviewing past sessions"
+echo ""
+echo "5. Chain Commands:"
+echo "   - PAW can chain multiple commands together"
+echo "   - Useful for complex workflows"
+echo ""
+echo "For more information, visit the documentation at:"
+echo "/usr/local/share/doc/paw/README.md"
+echo ""
+echo "Installation complete! You can now use PAW by typing 'paw' or 'PAW'."
+echo "================================================"
+
+if ! command -v dos2unix >/dev/null 2>&1; then
+  echo "dos2unix is not installed. Installing..."
+  apt-get install -y dos2unix
 fi
+
+echo "making paw-config executable"
+chmod +x /usr/local/bin/paw-config
+echo "converting paw-config to unix format"
+dos2unix /usr/local/bin/paw-config
+
 echo ""
 echo "Documentation: /usr/local/share/doc/paw/"
 echo ""
-
-
-
-# REMOVE SOON
-echo "[*] Converting line endings using dos2unix..."
-sudo dos2unix /usr/local/bin/paw-config
-
-# Step 4: Make script executable
-echo "[*] Making script executable..."
-sudo chmod +x /usr/local/bin/paw-config
-# REMOVE SOON
-
-
-
 if [ "$is_kali" = true ]; then
   echo "PAW is now optimized for Kali Linux. Happy hacking!"
 else

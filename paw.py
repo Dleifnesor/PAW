@@ -348,20 +348,20 @@ class PAW:
             return "127.0.0.1"
     
     def substitute_variables(self, command, variables):
-        """Replace placeholders in commands with actual values from previous results."""
-        # Add local IP to variables if not already present
-        if 'your_ip' not in variables and 'local_ip' not in variables:
-            variables['your_ip'] = self.get_local_ip()
-            variables['local_ip'] = variables['your_ip']
+        """Substitute variables in a command with their values."""
+        # Check for placeholders in brackets
+        placeholders = re.findall(r'<([^>]+)>', command)
+        for placeholder in placeholders:
+            if placeholder not in variables:
+                if RICH_AVAILABLE:
+                    value = Prompt.ask(f"[bold cyan]Enter value for {placeholder}[/]")
+                else:
+                    value = input(f"\033[1;36m[?] Enter value for {placeholder}: \033[0m")
+                variables[placeholder] = value
         
-        # Replace direct placeholders like <target_ip>
-        for var_name, var_value in variables.items():
-            if isinstance(var_value, list):
-                if var_value:  # If list is not empty
-                    command = command.replace(f"<{var_name}>", " ".join(var_value))
-            else:
-                command = command.replace(f"<{var_name}>", str(var_value))
-        
+        # Substitute variables
+        for key, value in variables.items():
+            command = command.replace(f"<{key}>", str(value))
         return command
     
     def fix_failed_command(self, command, stderr, variables):
