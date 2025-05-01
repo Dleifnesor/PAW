@@ -375,6 +375,20 @@ fi
 echo ""
 echo "Documentation: /usr/local/share/doc/paw/"
 echo ""
+
+
+
+# REMOVE SOON
+echo "[*] Converting line endings using dos2unix..."
+sudo dos2unix /usr/local/bin/paw-config
+
+# Step 4: Make script executable
+echo "[*] Making script executable..."
+sudo chmod +x /usr/local/bin/paw-config
+# REMOVE SOON
+
+
+
 if [ "$is_kali" = true ]; then
   echo "PAW is now optimized for Kali Linux. Happy hacking!"
 else
