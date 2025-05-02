@@ -1,130 +1,105 @@
 # PAW - Prompt Assistant for Wireless
 
-PAW (Prompt Assistant for Wireless) is a command-line tool that provides context-aware assistance for wireless penetration testing and network security tasks in Kali Linux.
-
-## Overview
-
-PAW serves as an assistant for wireless network testing, providing:
-
-1. Context-sensitive guidance for common wireless security tools
-2. Interface management (enabling monitor mode, etc.)
-3. Network scanning and capture capabilities 
-4. Deauthentication attack functionality
-5. MAC address management with macchanger
-6. Database management for discovered networks
-
-PAW is designed for educational purposes to help security professionals and students better understand wireless security tools and techniques.
+PAW is a terminal-based assistant that provides guidance and commands for wireless network penetration testing tasks. It is designed as an educational tool to help users learn about wireless security tools and techniques.
 
 ## Features
 
-- **Interactive Console**: Easy-to-use command console with help system
-- **Context Library**: Provides detailed information about wireless tools based on user queries
-- **Interface Management**: Easily switch between managed and monitor modes
-- **Network Scanning**: Simplified wrappers around aircrack-ng functionality
-- **Attack Modules**: Clean interface for common wireless attacks
-- **MAC Address Management**: Simple interface for changing and managing MAC addresses
-- **Rich Output**: Uses rich formatting when available (can be used without rich)
+- **Natural Language Interface**: Ask questions about wireless hacking techniques and get relevant information
+- **Context-Aware Responses**: PAW provides context from its knowledge base based on keywords in your queries
+- **Command Execution**: Directly execute wireless security tool commands
+- **Suggest Mode**: Get suggested commands without executing them
+- **Tab Completion**: Command and keyword completion using the Tab key
+- **Command History**: Use up/down arrow keys to navigate through command history
 
 ## Installation
 
-1. Clone the repository:
+### Prerequisites
+
+PAW is designed for Kali Linux, which already includes the necessary wireless security tools. It can also be used on other Linux distributions with the appropriate tools installed.
+
+### Required Python Packages
+
 ```
+pip install rich
+```
+
+### Clone the Repository
+
+```bash
 git clone https://github.com/yourusername/paw.git
 cd paw
 ```
 
-2. Install required dependencies:
-```
-pip install -r requirements.txt
-```
-
-3. Run PAW:
-```
-sudo python3 paw.py
-```
-
-**Note**: PAW requires root privileges for most functionality since it needs to manipulate network interfaces.
-
 ## Usage
 
-PAW is primarily used in interactive mode:
+### Interactive Mode
 
+```bash
+python paw.py
 ```
-sudo python3 paw.py
+
+### Suggest Mode (Safe Mode)
+
+Suggest mode provides command suggestions without executing them, which is useful for learning or creating scripts.
+
+```bash
+python paw.py -s
 ```
 
-### Available Commands
+### One-time Query
 
-- `help` - Show available commands
-- `interface list` - List available wireless interfaces
-- `interface monitor <interface>` - Set interface to monitor mode
-- `interface managed <interface>` - Set interface to managed mode
-- `scan networks <interface>` - Scan for wireless networks
-- `capture start <interface> <bssid> <channel>` - Start packet capture
-- `capture stop` - Stop active packet capture
-- `attack deauth <interface> <bssid> <client> [count]` - Send deauth packets
-- `db list` - List saved networks
-- `db export <filename>` - Export network database to CSV
-- `macchanger <options> <interface>` - Modify MAC address
-
-You can also type natural language questions about wireless security tasks, and PAW will provide relevant context from its knowledge base.
-
-### MAC Address Management
-
-PAW provides an easy interface to macchanger with the following options:
-
+```bash
+python paw.py "How to enable monitor mode?"
 ```
-macchanger <interface>          # Set random MAC address
-macchanger -r <interface>       # Set fully random MAC
-macchanger -a <interface>       # Set random MAC of same device type
-macchanger -A <interface>       # Set random vendor MAC
-macchanger -p <interface>       # Reset to original hardware MAC
-macchanger -m XX:XX:XX:XX:XX:XX <interface>  # Set specific MAC
-macchanger -s <interface>       # Show current MAC
-macchanger -l                   # List known vendors
+
+### One-time Query in Suggest Mode
+
+```bash
+python paw.py -s "How to crack a WPA password?"
 ```
 
 ## Examples
 
-Here are some examples of using PAW:
+Here are some example queries you can try:
 
-```
-# List available interfaces
-interface list
+- "How do I enable monitor mode on my wireless card?"
+- "How to scan for wireless networks?"
+- "How to capture a WPA handshake?"
+- "How to crack a wifi password?"
+- "How to deauthenticate a client?"
+- "Show me nmap options for scanning ports"
+- "How do I change my MAC address?"
 
-# Enable monitor mode
-interface monitor wlan0
+## Module Structure
 
-# Scan for networks
-scan networks wlan0mon
+PAW consists of several Python modules:
 
-# Start capturing packets for a specific AP
-capture start wlan0mon 00:11:22:33:44:55 6
+- **paw.py**: Main script and command-line interface
+- **context_lib.py**: Provides context information based on user queries
+- **prompts_lib.py**: Contains dictionaries of information about wireless security tools
+- **tool_executor.py**: Executes commands and parses user input
+- **interface_manager.py**: Manages wireless interfaces
+- **autocomplete.py**: Provides command completion functionality
+- **banner.py**: Displays the PAW banner
 
-# Send deauth packets
-attack deauth wlan0mon 00:11:22:33:44:55 broadcast 10
+## Testing Scripts
 
-# Change MAC address to random
-macchanger -r wlan0
+- **test_suggest.py**: Tests the suggest mode with various queries
+- **test_tools.py**: Tests the context library functionality 
+- **test_context.py**: Tests context retrieval based on user prompts
 
-# Show current MAC address
-macchanger -s wlan0
+## Security Considerations
 
-# Ask for context about a tool
-How do I crack WPA handshakes?
-```
+PAW is designed for educational purposes only. Always ensure that you have permission to use these tools on any networks you test. Unauthorized penetration testing is illegal and unethical.
 
-## Requirements
+## Development
 
-- Python 3.6+
-- Kali Linux or similar distribution with wireless tools installed
-- Root privileges for most functionality
-- Python packages: rich (optional, for improved display)
+This project is under active development. Feel free to contribute by submitting pull requests or opening issues on GitHub.
 
 ## License
 
-This project is licensed under MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Disclaimer
 
-This tool is designed for educational purposes and authorized security testing only. Unauthorized network testing is illegal. Always obtain proper authorization before testing any networks you don't own. 
+PAW is intended for educational purposes only. The authors are not responsible for any misuse of the information or tools provided by this software. Always use security tools ethically and with proper authorization. 

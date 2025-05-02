@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-# Interface Manager for PAW
-# Handles wireless interface management tasks
+# PAW Interface Manager
+# Handles wireless interface management functions
 
+import os
 import subprocess
 import re
-import os
-import time
-import platform
 from typing import List, Dict, Optional, Any
 
 class InterfaceManager:
-    """Class to manage wireless interfaces"""
+    """Class to manage wireless network interfaces"""
     
     def __init__(self):
         """Initialize the interface manager"""
@@ -18,396 +16,227 @@ class InterfaceManager:
         self.capture_file = None
     
     def get_wireless_interfaces(self) -> List[Dict[str, str]]:
-        """Get a list of wireless interfaces"""
+        """
+        Get a list of wireless interfaces on the system
+        
+        Returns:
+            List of dictionaries with interface information
+        """
         interfaces = []
         
         try:
-            # Handle different OS platforms
-            if platform.system() == "Linux":
-                # Use iw dev on Linux
-                output = subprocess.check_output(["iw", "dev"], universal_newlines=True)
-                
+            # Try using iw dev first (Linux)
+            result = subprocess.run(["iw", "dev"], capture_output=True, text=True)
+            
+            if result.returncode == 0:
                 # Parse iw dev output
                 current_interface = None
-                current_info = {}
-                
-                for line in output.splitlines():
+                for line in result.stdout.splitlines():
                     line = line.strip()
-                    if not line:
-                        continue
-                        
-                    # Interface line
+                    
                     if "Interface" in line:
-                        # Save previous interface if exists
-                        if current_interface and current_info:
-                            # Get MAC address for the interface
-                            try:
-                                mac_output = subprocess.check_output(["macchanger", "-s", current_interface], 
-                                                                    universal_newlines=True, stderr=subprocess.DEVNULL)
-                                mac_match = re.search(r"Current MAC:\s+([0-9A-F:]{17})", mac_output)
-                                if mac_match:
-                                    current_info["mac_address"] = mac_match.group(1)
-                                
-                                # Check if this is permanent or changed MAC
-                                perm_match = re.search(r"Permanent MAC:\s+([0-9A-F:]{17})", mac_output)
-                                if perm_match and perm_match.group(1) != current_info.get("mac_address"):
-                                    current_info["mac_changed"] = True
-                                    current_info["permanent_mac"] = perm_match.group(1)
-                                else:
-                                    current_info["mac_changed"] = False
-                                    
-                            except (subprocess.SubprocessError, FileNotFoundError):
-                                # If macchanger not available, try using ifconfig
-                                try:
-                                    ifconfig_output = subprocess.check_output(["ifconfig", current_interface], 
-                                                                           universal_newlines=True, stderr=subprocess.DEVNULL)
-                                    mac_match = re.search(r"ether\s+([0-9a-f:]{17})", ifconfig_output, re.IGNORECASE)
-                                    if mac_match:
-                                        current_info["mac_address"] = mac_match.group(1)
-                                except (subprocess.SubprocessError, FileNotFoundError):
-                                    current_info["mac_address"] = "Unknown"
-                                    
-                            interfaces.append(current_info)
+                        if current_interface:
+                            interfaces.append(current_interface)
                         
-                        # Start a new interface
-                        current_interface = line.split()[-1]
-                        current_info = {"name": current_interface}
+                        interface_name = line.split("Interface", 1)[1].strip()
+                        current_interface = {"name": interface_name, "mode": "managed"}
                     
-                    # Type line (managed, monitor, etc.)
-                    elif "type" in line and current_interface:
-                        type_match = re.search(r"type\s+(\w+)", line)
-                        if type_match:
-                            current_info["mode"] = type_match.group(1)
+                    if current_interface and "type" in line:
+                        mode = line.split("type", 1)[1].strip()
+                        current_interface["mode"] = mode
                 
-                # Add the last interface
-                if current_interface and current_info:
-                    # Get MAC address for the interface
-                    try:
-                        mac_output = subprocess.check_output(["macchanger", "-s", current_interface], 
-                                                           universal_newlines=True, stderr=subprocess.DEVNULL)
-                        mac_match = re.search(r"Current MAC:\s+([0-9A-F:]{17})", mac_output)
-                        if mac_match:
-                            current_info["mac_address"] = mac_match.group(1)
-                            
-                        # Check if this is permanent or changed MAC
-                        perm_match = re.search(r"Permanent MAC:\s+([0-9A-F:]{17})", mac_output)
-                        if perm_match and perm_match.group(1) != current_info.get("mac_address"):
-                            current_info["mac_changed"] = True
-                            current_info["permanent_mac"] = perm_match.group(1)
-                        else:
-                            current_info["mac_changed"] = False
-                            
-                    except (subprocess.SubprocessError, FileNotFoundError):
-                        # If macchanger not available, try using ifconfig
-                        try:
-                            ifconfig_output = subprocess.check_output(["ifconfig", current_interface], 
-                                                                  universal_newlines=True, stderr=subprocess.DEVNULL)
-                            mac_match = re.search(r"ether\s+([0-9a-f:]{17})", ifconfig_output, re.IGNORECASE)
-                            if mac_match:
-                                current_info["mac_address"] = mac_match.group(1)
-                        except (subprocess.SubprocessError, FileNotFoundError):
-                            current_info["mac_address"] = "Unknown"
-                            
-                    interfaces.append(current_info)
+                # Add the last interface if exists
+                if current_interface:
+                    interfaces.append(current_interface)
+                
+                # Get MAC addresses for each interface
+                for interface in interfaces:
+                    mac = self._get_mac_address(interface["name"])
+                    if mac:
+                        interface["mac_address"] = mac
             
-            elif platform.system() == "Windows":
-                # Use netsh on Windows
-                output = subprocess.check_output(["netsh", "wlan", "show", "interfaces"], universal_newlines=True)
+            # If iw dev fails or returns no interfaces, try ip link (more generic)
+            if not interfaces and os.name != "nt":  # Not on Windows
+                result = subprocess.run(["ip", "link"], capture_output=True, text=True)
                 
-                # Parse netsh output
-                current_interface = None
-                current_info = {}
+                if result.returncode == 0:
+                    for line in result.stdout.splitlines():
+                        if ": " in line and "<" in line and ">" in line:
+                            parts = line.split(": ", 1)
+                            if len(parts) > 1 and "lo" not in parts[1]:  # Skip loopback
+                                interface_name = parts[1].split(":", 1)[0]
+                                # Check if it's wireless (wlan, mon, etc.)
+                                if any(keyword in interface_name for keyword in ["wlan", "mon", "wifi", "wl", "ath"]):
+                                    interface = {"name": interface_name, "mode": "unknown"}
+                                    mac = self._get_mac_address(interface_name)
+                                    if mac:
+                                        interface["mac_address"] = mac
+                                    interfaces.append(interface)
+            
+            # On Windows, try netsh (or other Windows-specific methods)
+            if not interfaces and os.name == "nt":
+                result = subprocess.run(["netsh", "wlan", "show", "interfaces"], capture_output=True, text=True)
                 
-                for line in output.splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
+                if result.returncode == 0:
+                    current_interface = None
+                    for line in result.stdout.splitlines():
+                        line = line.strip()
                         
-                    if "Name" in line and ":" in line:
-                        # Save previous interface if exists
-                        if current_interface and current_info:
-                            interfaces.append(current_info)
+                        if "Name" in line and ":" in line:
+                            if current_interface:
+                                interfaces.append(current_interface)
+                            
+                            interface_name = line.split(":", 1)[1].strip()
+                            current_interface = {"name": interface_name, "mode": "managed"}
                         
-                        # Start a new interface
-                        current_interface = line.split(":", 1)[1].strip()
-                        current_info = {"name": current_interface, "mode": "managed"}  # Windows interfaces are always in managed mode
+                        if current_interface and "Physical address" in line and ":" in line:
+                            mac = line.split(":", 1)[1].strip()
+                            current_interface["mac_address"] = mac
                     
-                    elif "Physical address" in line and ":" in line and current_interface:
-                        mac = line.split(":", 1)[1].strip()
-                        current_info["mac_address"] = mac
-                
-                # Add the last interface
-                if current_interface and current_info:
-                    interfaces.append(current_info)
+                    # Add the last interface if exists
+                    if current_interface:
+                        interfaces.append(current_interface)
             
-            else:
-                # For other platforms, provide a limited implementation
-                # This is a very basic fallback that won't work well
-                output = subprocess.check_output(["ifconfig"], universal_newlines=True)
-                for line in output.splitlines():
-                    if "wlan" in line or "eth" in line or "en" in line:
-                        interface_name = line.split(":")[0].strip()
-                        interfaces.append({"name": interface_name, "mode": "unknown", "mac_address": "Unknown"})
-        
-        except (subprocess.SubprocessError, FileNotFoundError) as e:
-            print(f"Warning: Couldn't get wireless interfaces: {e}")
-            # Provide a minimal fallback
-            if platform.system() == "Linux":
-                try:
-                    # Try to get interfaces from /proc
-                    with open("/proc/net/dev") as f:
-                        for line in f:
-                            if ":" in line and ("wlan" in line or "eth" in line or "mon" in line):
-                                interface_name = line.split(":")[0].strip()
-                                interfaces.append({"name": interface_name, "mode": "unknown", "mac_address": "Unknown"})
-                except Exception:
-                    pass
+        except Exception as e:
+            print(f"Error getting wireless interfaces: {e}")
         
         return interfaces
     
-    def enable_monitor_mode(self, interface_name: str) -> str:
-        """Enable monitor mode on an interface"""
-        if platform.system() != "Linux":
-            return f"Monitor mode is only supported on Linux, not on {platform.system()}"
-        
+    def _get_mac_address(self, interface_name: str) -> Optional[str]:
+        """Get MAC address for a given interface"""
         try:
-            # Check if airmon-ng is available
-            airmon_available = False
-            try:
-                subprocess.check_call(["which", "airmon-ng"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                airmon_available = True
-            except subprocess.SubprocessError:
-                pass
+            # Try using ip link command (Linux)
+            result = subprocess.run(["ip", "link", "show", interface_name], capture_output=True, text=True)
             
-            if airmon_available:
-                # Kill processes that might interfere with monitor mode
-                subprocess.run(["airmon-ng", "check", "kill"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                # Enable monitor mode
-                subprocess.run(["airmon-ng", "start", interface_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                # Determine the new interface name (usually interface_name + "mon")
-                time.sleep(1)  # Give it a moment to change
-                interfaces = self.get_wireless_interfaces()
-                for interface in interfaces:
-                    if interface_name in interface["name"] and "mon" in interface["name"]:
-                        return f"Monitor mode enabled on {interface['name']} (MAC: {interface.get('mac_address', 'Unknown')})"
-                
-                # If we can't find the mon interface, assume it's the same name
-                return f"Monitor mode may be enabled on {interface_name}, but couldn't confirm"
-            else:
-                # Alternative method using iw
-                try:
-                    # Set interface down
-                    subprocess.run(["ifconfig", interface_name, "down"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    
-                    # Set monitor mode
-                    subprocess.run(["iw", "dev", interface_name, "set", "monitor", "none"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    
-                    # Set interface up
-                    subprocess.run(["ifconfig", interface_name, "up"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    
-                    return f"Monitor mode enabled on {interface_name} (using iw method)"
-                except subprocess.SubprocessError:
-                    return f"Failed to enable monitor mode on {interface_name} using iw method"
-        
-        except subprocess.SubprocessError as e:
-            return f"Error enabling monitor mode: {e}"
-    
-    def set_managed_mode(self, interface_name: str) -> str:
-        """Set an interface to managed mode"""
-        if platform.system() != "Linux":
-            return f"Setting managed mode is only supported on Linux, not on {platform.system()}"
-        
-        try:
-            # Check if airmon-ng is available
-            airmon_available = False
-            try:
-                subprocess.check_call(["which", "airmon-ng"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                airmon_available = True
-            except subprocess.SubprocessError:
-                pass
+            if result.returncode == 0:
+                mac_match = re.search(r'link/ether\s+([0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2})', result.stdout)
+                if mac_match:
+                    return mac_match.group(1).upper()
             
-            if airmon_available and "mon" in interface_name:
-                # Stop monitor mode with airmon-ng
-                subprocess.run(["airmon-ng", "stop", interface_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                # Determine the new interface name (usually interface_name without "mon")
-                time.sleep(1)  # Give it a moment to change
-                interfaces = self.get_wireless_interfaces()
-                base_name = interface_name.replace("mon", "")
-                for interface in interfaces:
-                    if base_name in interface["name"] and "mon" not in interface["name"]:
-                        # Start network manager if it was killed
-                        subprocess.run(["service", "NetworkManager", "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        return f"Managed mode enabled on {interface['name']} (MAC: {interface.get('mac_address', 'Unknown')})"
-                
-                # If we can't find the managed interface, assume it's the base name
-                # Start network manager if it was killed
-                subprocess.run(["service", "NetworkManager", "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return f"Managed mode may be enabled on {base_name}, but couldn't confirm"
-            else:
-                # Alternative method using iw
-                try:
-                    # Set interface down
-                    subprocess.run(["ifconfig", interface_name, "down"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    
-                    # Set managed mode
-                    subprocess.run(["iw", "dev", interface_name, "set", "type", "managed"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    
-                    # Set interface up
-                    subprocess.run(["ifconfig", interface_name, "up"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    
-                    # Restart network manager
-                    subprocess.run(["service", "NetworkManager", "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    
-                    return f"Managed mode enabled on {interface_name} (using iw method)"
-                except subprocess.SubprocessError:
-                    return f"Failed to enable managed mode on {interface_name} using iw method"
-        
-        except subprocess.SubprocessError as e:
-            return f"Error setting managed mode: {e}"
-    
-    def set_active_capture(self, process, output_file):
-        """Store the active capture process and filename"""
-        self.active_capture = process
-        self.capture_file = output_file
-    
-    def disable_all_monitor_modes(self):
-        """Disable monitor mode on all interfaces"""
-        if platform.system() != "Linux":
-            return
-        
-        try:
-            # First, kill any active captures
-            if self.active_capture:
-                self.active_capture.terminate()
-                self.active_capture = None
+            # Fallback to ifconfig for systems that have it
+            result = subprocess.run(["ifconfig", interface_name], capture_output=True, text=True)
             
-            # Get all interfaces
-            interfaces = self.get_wireless_interfaces()
+            if result.returncode == 0:
+                mac_match = re.search(r'(?:ether|HWaddr)\s+([0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2})', result.stdout)
+                if mac_match:
+                    return mac_match.group(1).upper()
             
-            # Check if airmon-ng is available
-            airmon_available = False
-            try:
-                subprocess.check_call(["which", "airmon-ng"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                airmon_available = True
-            except subprocess.SubprocessError:
-                pass
-            
-            # Disable monitor mode on all monitor interfaces
-            for interface in interfaces:
-                if interface.get("mode") == "monitor":
-                    if airmon_available:
-                        subprocess.run(["airmon-ng", "stop", interface["name"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    else:
-                        # Fallback to iw method
-                        try:
-                            subprocess.run(["ifconfig", interface["name"], "down"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            subprocess.run(["iw", "dev", interface["name"], "set", "type", "managed"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            subprocess.run(["ifconfig", interface["name"], "up"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        except subprocess.SubprocessError:
-                            pass
-            
-            # Start network manager if it was killed
-            subprocess.run(["service", "NetworkManager", "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        except Exception as e:
-            print(f"Warning during monitor mode cleanup: {e}")
-    
-    def change_mac_address(self, interface_name: str, new_mac: Optional[str] = None, random: bool = False,
-                          same_vendor: bool = False, random_vendor: bool = False, permanent: bool = False) -> str:
-        """Change the MAC address of an interface using macchanger"""
-        if platform.system() != "Linux":
-            return f"Changing MAC address is only supported on Linux, not on {platform.system()}"
-        
-        try:
-            # Check if macchanger is available
-            try:
-                subprocess.check_call(["which", "macchanger"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except subprocess.SubprocessError:
-                return "macchanger is not installed. Install with: sudo apt-get install macchanger"
-            
-            # Take down the interface
-            subprocess.run(["ifconfig", interface_name, "down"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            # Determine which macchanger option to use
-            if permanent:
-                result = subprocess.run(["macchanger", "-p", interface_name], capture_output=True, text=True)
-                mac_type = "permanent (original)"
-            elif new_mac:
-                result = subprocess.run(["macchanger", "-m", new_mac, interface_name], capture_output=True, text=True)
-                mac_type = f"specific ({new_mac})"
-            elif same_vendor:
-                result = subprocess.run(["macchanger", "-a", interface_name], capture_output=True, text=True)
-                mac_type = "same vendor random"
-            elif random_vendor:
-                result = subprocess.run(["macchanger", "-A", interface_name], capture_output=True, text=True)
-                mac_type = "random vendor"
-            elif random:
-                result = subprocess.run(["macchanger", "-r", interface_name], capture_output=True, text=True)
-                mac_type = "fully random"
-            else:
-                # Default to random
-                result = subprocess.run(["macchanger", "-r", interface_name], capture_output=True, text=True)
-                mac_type = "fully random"
-            
-            # Bring the interface back up
-            subprocess.run(["ifconfig", interface_name, "up"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            # Extract new MAC from macchanger output
-            new_mac_match = re.search(r"New MAC:\s+([0-9A-F:]{17})", result.stdout)
-            if new_mac_match:
-                new_mac_value = new_mac_match.group(1)
-                return f"MAC address of {interface_name} changed to {new_mac_value} ({mac_type})"
-            else:
-                return f"MAC address change failed or couldn't confirm new MAC"
-        
-        except subprocess.SubprocessError as e:
-            return f"Error changing MAC address: {e}"
-        finally:
-            # Make sure the interface is up even if something failed
-            try:
-                subprocess.run(["ifconfig", interface_name, "up"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except:
-                pass
-    
-    def get_interface_mac(self, interface_name: str) -> Dict[str, str]:
-        """Get current and permanent MAC addresses for an interface"""
-        result = {
-            "current_mac": "Unknown",
-            "permanent_mac": "Unknown",
-            "is_changed": False
-        }
-        
-        if platform.system() != "Linux":
-            return result
-        
-        try:
-            # Try with macchanger first
-            try:
-                mac_output = subprocess.check_output(["macchanger", "-s", interface_name], 
-                                                   universal_newlines=True, stderr=subprocess.DEVNULL)
-                
-                current_match = re.search(r"Current MAC:\s+([0-9A-F:]{17})", mac_output)
-                if current_match:
-                    result["current_mac"] = current_match.group(1)
-                
-                perm_match = re.search(r"Permanent MAC:\s+([0-9A-F:]{17})", mac_output)
-                if perm_match:
-                    result["permanent_mac"] = perm_match.group(1)
-                    result["is_changed"] = (result["current_mac"] != result["permanent_mac"])
-            except (subprocess.SubprocessError, FileNotFoundError):
-                # Fall back to ifconfig
-                try:
-                    ifconfig_output = subprocess.check_output(["ifconfig", interface_name], 
-                                                           universal_newlines=True, stderr=subprocess.DEVNULL)
-                    mac_match = re.search(r"ether\s+([0-9a-f:]{17})", ifconfig_output, re.IGNORECASE)
-                    if mac_match:
-                        result["current_mac"] = mac_match.group(1)
-                except (subprocess.SubprocessError, FileNotFoundError):
-                    pass
         except Exception as e:
             print(f"Error getting MAC address: {e}")
         
-        return result 
+        return None
+    
+    def enable_monitor_mode(self, interface_name: str) -> str:
+        """
+        Enable monitor mode on a wireless interface
+        
+        Args:
+            interface_name: Name of the interface to put in monitor mode
+            
+        Returns:
+            Status message
+        """
+        try:
+            # Check if airmon-ng is available
+            airmon_check = subprocess.run(["which", "airmon-ng"], capture_output=True, text=True)
+            if airmon_check.returncode != 0:
+                return "Error: airmon-ng not found. Make sure it's installed."
+            
+            # Kill potential interfering processes
+            kill_cmd = subprocess.run(["airmon-ng", "check", "kill"], capture_output=True, text=True)
+            
+            # Start monitor mode
+            result = subprocess.run(["airmon-ng", "start", interface_name], capture_output=True, text=True)
+            
+            # Try to find the monitor interface name from the output
+            monitor_interface = None
+            if "monitor mode enabled" in result.stdout:
+                # Modern airmon-ng often adds 'mon' to the interface name
+                monitor_interface = f"{interface_name}mon"
+            else:
+                # Try to parse the output to find the actual name
+                match = re.search(r'monitor mode (?:enabled|vif) on\s+([^\s\)]+)', result.stdout)
+                if match:
+                    monitor_interface = match.group(1)
+            
+            if monitor_interface:
+                return f"Monitor mode enabled on {interface_name}. New interface: {monitor_interface}"
+            else:
+                # If we can't determine the new interface name, just return success
+                return f"Monitor mode enabled on {interface_name}. Check 'iwconfig' to see the new interface name."
+                
+        except Exception as e:
+            return f"Error enabling monitor mode: {e}"
+    
+    def set_managed_mode(self, interface_name: str) -> str:
+        """
+        Set an interface to managed mode
+        
+        Args:
+            interface_name: Name of the interface to put in managed mode
+            
+        Returns:
+            Status message
+        """
+        try:
+            # Check if airmon-ng is available
+            airmon_check = subprocess.run(["which", "airmon-ng"], capture_output=True, text=True)
+            if airmon_check.returncode != 0:
+                return "Error: airmon-ng not found. Make sure it's installed."
+            
+            # Stop monitor mode
+            result = subprocess.run(["airmon-ng", "stop", interface_name], capture_output=True, text=True)
+            
+            # Try to find the managed interface name from the output
+            managed_interface = None
+            match = re.search(r'(?:mode disabled on|switched to managed mode)\s+([^\s\)]+)', result.stdout)
+            if match:
+                managed_interface = match.group(1)
+                
+            # If monitor mode is stopped but we don't know the new interface name
+            if not managed_interface and "monitor mode disabled" in result.stdout:
+                # Remove 'mon' from the interface name if it exists
+                if interface_name.endswith("mon"):
+                    managed_interface = interface_name[:-3]
+                else:
+                    managed_interface = interface_name
+            
+            if managed_interface:
+                return f"Managed mode set on {interface_name}. New interface: {managed_interface}"
+            else:
+                # If we can't determine the new interface name, just return success
+                return f"Managed mode set. Check 'iwconfig' to see the new interface name."
+                
+        except Exception as e:
+            return f"Error setting managed mode: {e}"
+    
+    def set_active_capture(self, process, filename: str) -> None:
+        """Store information about an active capture process"""
+        self.active_capture = process
+        self.capture_file = filename
+    
+    def disable_all_monitor_modes(self) -> None:
+        """Disable monitor mode on all interfaces"""
+        try:
+            interfaces = self.get_wireless_interfaces()
+            for interface in interfaces:
+                if interface.get("mode") == "monitor":
+                    self.set_managed_mode(interface["name"])
+                    
+            # Also kill any active capture process
+            if self.active_capture:
+                self.active_capture.terminate()
+                self.active_capture = None
+                self.capture_file = None
+                
+        except Exception as e:
+            print(f"Error disabling monitor modes: {e}")
+
+if __name__ == "__main__":
+    # Test the interface manager
+    manager = InterfaceManager()
+    interfaces = manager.get_wireless_interfaces()
+    
+    print("Detected wireless interfaces:")
+    for interface in interfaces:
+        print(f"  {interface['name']} - MAC: {interface.get('mac_address', 'Unknown')} - Mode: {interface.get('mode', 'Unknown')}") 
